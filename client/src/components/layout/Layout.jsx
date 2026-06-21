@@ -109,6 +109,7 @@ export default function Layout() {
           aria-modal="true"
           aria-label="Navigation"
           aria-hidden={!mobileNavOpen}
+          inert={!mobileNavOpen ? '' : undefined}
         >
           <Sidebar />
         </div>

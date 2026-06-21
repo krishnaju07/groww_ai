@@ -1,3 +1,4 @@
+import { isValidElement } from 'react';
 import { cx, GLOW_ACCENT } from '../../lib/ui';
 
 /**
@@ -13,11 +14,14 @@ import { cx, GLOW_ACCENT } from '../../lib/ui';
  * @returns {JSX.Element}
  */
 export default function EmptyState({ icon: Icon, title, message, action }) {
-  // Accept either a component (e.g. lucide `Inbox`) or an already-built node.
+  // `icon` may be a React element (<Icon/>) OR a component type — including a
+  // lucide forwardRef object, which is NOT `typeof 'function'`. Render valid
+  // elements as-is; instantiate anything else as a component.
   let iconNode = null;
-  if (Icon) {
-    iconNode =
-      typeof Icon === 'function' ? <Icon size={22} className="text-accent" /> : Icon;
+  if (isValidElement(Icon)) {
+    iconNode = Icon;
+  } else if (Icon) {
+    iconNode = <Icon size={22} className="text-accent" />;
   }
 
   return (

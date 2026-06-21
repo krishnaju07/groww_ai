@@ -137,6 +137,7 @@ export default function StockDrawer() {
         aria-modal="true"
         aria-label={symbol ? `${symbol} details` : 'Stock details'}
         aria-hidden={!open}
+        inert={!open ? '' : undefined}
       >
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-white/[0.06] bg-bg/80 px-5 py-4 backdrop-blur-xl">
