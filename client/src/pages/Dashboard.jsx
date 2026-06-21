@@ -86,9 +86,14 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className={cx('font-display text-2xl font-bold tracking-tight', GRADIENT_TEXT)}>
-          Dashboard
-        </h1>
+        <div>
+          <h1 className={cx('font-display text-2xl font-bold tracking-tight', GRADIENT_TEXT)}>
+            Dashboard
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Your portfolio, AI signals and recent activity at a glance.
+          </p>
+        </div>
         <span
           className={cx(
             PILL,

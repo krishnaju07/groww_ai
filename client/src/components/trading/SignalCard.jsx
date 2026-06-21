@@ -1,8 +1,12 @@
 import { Activity, BarChart3, Gauge, Layers } from 'lucide-react';
 import SignalBadge from '../common/SignalBadge';
 import ConfidenceMeter from '../common/ConfidenceMeter';
+import InfoHint from '../common/InfoHint';
 import Skeleton from '../common/Skeleton';
 import { GLASS_CARD, GLASS_PANEL, LABEL, NUM, cx } from '../../lib/ui';
+
+const CONFIDENCE_HINT =
+  'AI confidence 0–100 from RSI, MACD, momentum, trend & volume.';
 
 /**
  * @typedef {import('../../types').AISignal} AISignal
@@ -86,8 +90,12 @@ export default function SignalCard({ signal, loading = false }) {
             {signal.reason}
           </p>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 flex-col items-center gap-1">
           <ConfidenceMeter score={signal.confidence} size="md" />
+          <div className="flex items-center gap-1">
+            <span className={LABEL}>Confidence</span>
+            <InfoHint text={CONFIDENCE_HINT} side="top" />
+          </div>
         </div>
       </div>
 

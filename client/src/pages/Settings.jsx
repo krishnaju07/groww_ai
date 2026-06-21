@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Save, SlidersHorizontal } from 'lucide-react';
 import useSettingsStore from '../store/useSettingsStore';
+import { toast } from '../store/useToastStore';
 import InvestmentLimits from '../components/settings/InvestmentLimits';
 import AutoInvestSettings from '../components/settings/AutoInvestSettings';
 import AutoExitSettings from '../components/settings/AutoExitSettings';
@@ -73,8 +74,11 @@ export default function Settings() {
       };
       await updateSettings(patch);
       setSaved(true);
+      toast.success('Settings saved');
     } catch (err) {
-      setSaveError(err && err.message ? err.message : 'Failed to save settings.');
+      const message = err && err.message ? err.message : 'Failed to save settings.';
+      setSaveError(message);
+      toast.error('Save failed', message);
     }
   };
 

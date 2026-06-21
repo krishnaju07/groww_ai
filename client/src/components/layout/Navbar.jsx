@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
-import { Activity } from 'lucide-react';
+import { Activity, Menu, Search } from 'lucide-react';
 import usePortfolioStore from '../../store/usePortfolioStore';
 import useStocksStore from '../../store/useStocksStore';
 import useTradingModeStore from '../../store/useTradingModeStore';
+import useUiStore from '../../store/useUiStore';
 import { formatINR, formatPercent, pnlColorClass } from '../../lib/format';
 import { cx, GRADIENT_TEXT, GLOW_ACCENT, LABEL, NUM } from '../../lib/ui';
 import AnimatedNumber from '../common/AnimatedNumber';
 import TradingModeToggle from '../common/TradingModeToggle';
+import NotificationsBell from './NotificationsBell';
 
 /**
  * Top navigation bar.
@@ -23,6 +25,8 @@ export default function Navbar() {
   const fetchStocks = useStocksStore((s) => s.fetchStocks);
   const tradingStatus = useTradingModeStore((s) => s.status);
   const mode = tradingStatus ? tradingStatus.mode : 'paper';
+  const toggleMobileNav = useUiStore((s) => s.toggleMobileNav);
+  const openPalette = useUiStore((s) => s.openPalette);
 
   useEffect(() => {
     fetchPortfolio();
@@ -41,6 +45,16 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-6 border-b border-white/[0.06] bg-bg/70 px-6 backdrop-blur-xl">
+      {/* Hamburger — opens the mobile nav drawer (md and below) */}
+      <button
+        type="button"
+        onClick={toggleMobileNav}
+        aria-label="Open navigation menu"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-muted transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 md:hidden"
+      >
+        <Menu size={18} />
+      </button>
+
       {/* Brand */}
       <div className="flex shrink-0 items-center gap-3">
         <div
@@ -121,6 +135,22 @@ export default function Navbar() {
             {formatINR(dayPnl)} ({formatPercent(dayPnlPercent)})
           </span>
         </div>
+
+        {/* Compact command-palette search trigger (hidden on small screens) */}
+        <button
+          type="button"
+          onClick={openPalette}
+          aria-label="Open search (Command or Ctrl + K)"
+          className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-muted transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 sm:flex"
+        >
+          <Search size={15} />
+          <span>Search…</span>
+          <kbd className="ml-1 rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+            ⌘K
+          </kbd>
+        </button>
+
+        <NotificationsBell />
         <TradingModeToggle />
       </div>
     </header>

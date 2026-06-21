@@ -2,6 +2,7 @@ import { Bot, Zap } from 'lucide-react';
 import Card from '../common/Card';
 import ToggleSwitch from '../common/ToggleSwitch';
 import RangeSlider from '../common/RangeSlider';
+import InfoHint from '../common/InfoHint';
 import { formatDateTime } from '../../lib/format';
 import { cx, GLASS_PANEL, LABEL, PILL } from '../../lib/ui';
 
@@ -73,6 +74,10 @@ export default function AutoInvestSettings({ settings, onChange }) {
         </div>
 
         <div className={enabled ? '' : 'pointer-events-none opacity-50'}>
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className={LABEL}>Confidence threshold</span>
+            <InfoHint text="Auto-invest only triggers on BUY signals at/above this confidence." />
+          </div>
           <RangeSlider
             label="Minimum confidence score"
             value={minConfidenceScore}

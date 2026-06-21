@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Wallet, TrendingUp, Settings, FlaskConical, Activity } from 'lucide-react';
+import { LayoutDashboard, Wallet, TrendingUp, Settings, FlaskConical, Activity, Search } from 'lucide-react';
+import useUiStore from '../../store/useUiStore';
 import { cx, GRADIENT_TEXT, GLOW_ACCENT } from '../../lib/ui';
 
 /**
@@ -25,6 +26,9 @@ const NAV_ITEMS = [
  * @returns {JSX.Element}
  */
 export default function Sidebar() {
+  const closeMobileNav = useUiStore((s) => s.closeMobileNav);
+  const openPalette = useUiStore((s) => s.openPalette);
+
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-white/[0.06] bg-white/[0.02] backdrop-blur-xl">
       {/* Brand */}
@@ -50,6 +54,7 @@ export default function Sidebar() {
             key={to}
             to={to}
             end={to === '/'}
+            onClick={closeMobileNav}
             className={({ isActive }) =>
               cx(
                 'group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
@@ -79,6 +84,20 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-white/[0.06] p-4">
+        <button
+          type="button"
+          onClick={openPalette}
+          aria-label="Open search (Command or Ctrl + K)"
+          className="mb-3 flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-muted transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        >
+          <span className="flex items-center gap-2">
+            <Search size={14} />
+            Search…
+          </span>
+          <kbd className="rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+            ⌘K
+          </kbd>
+        </button>
         <p className="text-[11px] leading-relaxed text-muted">
           Paper trading only · No real money
         </p>

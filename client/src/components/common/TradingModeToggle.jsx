@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck, Zap, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import useTradingModeStore from '../../store/useTradingModeStore';
+import { toast } from '../../store/useToastStore';
 import Modal from './Modal';
 import Spinner from './Spinner';
 import { cx, BTN_PRIMARY, BTN_GHOST } from '../../lib/ui';
@@ -36,8 +37,11 @@ export default function TradingModeToggle() {
     setError(null);
     try {
       await setMode('paper');
+      toast.info('Switched to paper mode');
     } catch (err) {
-      setError(err && err.message ? err.message : 'Failed to switch');
+      const message = err && err.message ? err.message : 'Failed to switch';
+      setError(message);
+      toast.error('Failed to switch', message);
     }
   };
 
@@ -56,8 +60,11 @@ export default function TradingModeToggle() {
     try {
       await setMode('live');
       setConfirmLive(false);
+      toast.info('Switched to live mode');
     } catch (err) {
-      setError(err && err.message ? err.message : 'Failed to switch to live');
+      const message = err && err.message ? err.message : 'Failed to switch to live';
+      setError(message);
+      toast.error('Failed to switch', message);
     }
   };
 

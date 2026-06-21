@@ -9,6 +9,7 @@ import Spinner from '../components/common/Spinner';
 import Skeleton from '../components/common/Skeleton';
 import RangeSlider from '../components/common/RangeSlider';
 import INRInput from '../components/common/INRInput';
+import EmptyState from '../components/common/EmptyState';
 import EquityCurve from '../components/dashboard/EquityCurve';
 import {
   formatINR,
@@ -153,12 +154,22 @@ export default function Backtest() {
 
           {!running && !result && !error && (
             <Card title="Results" subtitle="Run a backtest to see performance">
-              <div className="flex h-48 flex-col items-center justify-center gap-3 text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-muted">
-                  <FlaskConical size={22} />
-                </span>
-                <p className="text-sm text-muted">No backtest run yet.</p>
-              </div>
+              <EmptyState
+                icon={FlaskConical}
+                title="No backtest run yet"
+                message="Pick a symbol, set your date range and risk rules, then run a backtest to see performance."
+                action={
+                  <button
+                    type="button"
+                    onClick={handleRun}
+                    disabled={!canRun}
+                    className={cx(BTN_PRIMARY)}
+                  >
+                    <Play size={16} />
+                    Run backtest
+                  </button>
+                }
+              />
             </Card>
           )}
 

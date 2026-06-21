@@ -2,7 +2,8 @@ import { ShieldCheck, Sparkles } from 'lucide-react';
 import Card from '../common/Card';
 import ToggleSwitch from '../common/ToggleSwitch';
 import RangeSlider from '../common/RangeSlider';
-import { cx, GLASS_PANEL, PILL } from '../../lib/ui';
+import InfoHint from '../common/InfoHint';
+import { cx, GLASS_PANEL, LABEL, PILL } from '../../lib/ui';
 
 /**
  * @typedef {import('../../types').UserSettings} UserSettings
@@ -79,33 +80,51 @@ export default function AutoExitSettings({ settings, onChange }) {
         </div>
 
         <div className={cx('flex flex-col gap-6', enabled ? '' : 'pointer-events-none opacity-50')}>
-          <RangeSlider
-            label="Stop loss"
-            value={stopLossPercent}
-            min={STOP_LOSS.min}
-            max={STOP_LOSS.max}
-            step={STOP_LOSS.step}
-            onChange={(v) => patch({ stopLossPercent: v })}
-            format={(v) => `${v.toFixed(1)}%`}
-          />
-          <RangeSlider
-            label="Take profit"
-            value={takeProfitPercent}
-            min={TAKE_PROFIT.min}
-            max={TAKE_PROFIT.max}
-            step={TAKE_PROFIT.step}
-            onChange={(v) => patch({ takeProfitPercent: v })}
-            format={(v) => `${v.toFixed(1)}%`}
-          />
-          <RangeSlider
-            label="Trailing stop (0 = disabled)"
-            value={trailingStopPercent}
-            min={TRAILING.min}
-            max={TRAILING.max}
-            step={TRAILING.step}
-            onChange={(v) => patch({ trailingStopPercent: v })}
-            format={(v) => (v <= 0 ? 'Off' : `${v.toFixed(1)}%`)}
-          />
+          <div>
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className={LABEL}>Stop loss</span>
+              <InfoHint text="Sell if a position falls this % below its entry price." />
+            </div>
+            <RangeSlider
+              label="Stop loss"
+              value={stopLossPercent}
+              min={STOP_LOSS.min}
+              max={STOP_LOSS.max}
+              step={STOP_LOSS.step}
+              onChange={(v) => patch({ stopLossPercent: v })}
+              format={(v) => `${v.toFixed(1)}%`}
+            />
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className={LABEL}>Take profit</span>
+              <InfoHint text="Sell to lock in gains once a position rises this % above entry." />
+            </div>
+            <RangeSlider
+              label="Take profit"
+              value={takeProfitPercent}
+              min={TAKE_PROFIT.min}
+              max={TAKE_PROFIT.max}
+              step={TAKE_PROFIT.step}
+              onChange={(v) => patch({ takeProfitPercent: v })}
+              format={(v) => `${v.toFixed(1)}%`}
+            />
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className={LABEL}>Trailing stop</span>
+              <InfoHint text="Trails the peak price by this %; sells if it pulls back. 0 = off." />
+            </div>
+            <RangeSlider
+              label="Trailing stop (0 = disabled)"
+              value={trailingStopPercent}
+              min={TRAILING.min}
+              max={TRAILING.max}
+              step={TRAILING.step}
+              onChange={(v) => patch({ trailingStopPercent: v })}
+              format={(v) => (v <= 0 ? 'Off' : `${v.toFixed(1)}%`)}
+            />
+          </div>
 
           <div className={cx(GLASS_PANEL, 'flex flex-col gap-3 p-4')}>
             <ToggleSwitch

@@ -12,6 +12,7 @@ import useSettingsStore from '../../store/useSettingsStore';
 import useSignalsStore from '../../store/useSignalsStore';
 import usePortfolioStore from '../../store/usePortfolioStore';
 import useTradingModeStore from '../../store/useTradingModeStore';
+import { toast } from '../../store/useToastStore';
 import { executeManualTrade } from '../../services/trades.service';
 import { formatINR } from '../../lib/format';
 import {
@@ -133,17 +134,21 @@ export default function TradePanel() {
       });
       await fetchPortfolio();
       const verb = trade.action === 'BUY' ? 'Bought' : 'Sold';
+      const successMessage = `${verb} ${trade.quantity} ${trade.symbol} @ ${formatINR(
+        trade.price,
+      )} (${formatINR(trade.investmentAmount)})`;
       setResult({
         type: 'success',
-        message: `${verb} ${trade.quantity} ${trade.symbol} @ ${formatINR(
-          trade.price,
-        )} (${formatINR(trade.investmentAmount)})`,
+        message: successMessage,
       });
+      toast.success('Order placed', successMessage);
     } catch (err) {
+      const errorMessage = err && err.message ? err.message : 'Trade failed.';
       setResult({
         type: 'error',
-        message: err && err.message ? err.message : 'Trade failed.',
+        message: errorMessage,
       });
+      toast.error('Trade failed', errorMessage);
     } finally {
       setSubmitting(false);
     }
