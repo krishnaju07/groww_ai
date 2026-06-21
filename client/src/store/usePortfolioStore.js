@@ -16,24 +16,34 @@ import { getPortfolio } from '../services/portfolio.service.js';
  * @property {() => Promise<void>} fetchPortfolio
  */
 
+// Collapse concurrent fetchPortfolio() calls into one in-flight request. No TTL:
+// polling and post-trade refreshes must always fetch fresh portfolio state.
+let portfolioInflight = null;
+
 /** @type {import('zustand').UseBoundStore<import('zustand').StoreApi<PortfolioState>>} */
 const usePortfolioStore = create((set) => ({
   summary: null,
   positions: [],
   loading: false,
   error: null,
-  async fetchPortfolio() {
+  fetchPortfolio() {
+    if (portfolioInflight) return portfolioInflight;
     set({ loading: true, error: null });
-    try {
-      const data = await getPortfolio();
-      set({
-        summary: data.summary,
-        positions: data.positions,
-        loading: false,
-      });
-    } catch (err) {
-      set({ error: err.message || 'Failed to load portfolio', loading: false });
-    }
+    portfolioInflight = (async () => {
+      try {
+        const data = await getPortfolio();
+        set({
+          summary: data.summary,
+          positions: data.positions,
+          loading: false,
+        });
+      } catch (err) {
+        set({ error: err.message || 'Failed to load portfolio', loading: false });
+      } finally {
+        portfolioInflight = null;
+      }
+    })();
+    return portfolioInflight;
   },
 }));
 

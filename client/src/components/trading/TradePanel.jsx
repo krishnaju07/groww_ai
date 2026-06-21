@@ -292,6 +292,19 @@ export default function TradePanel() {
                 </span>
               </div>
 
+              {amountValid && price > 0 && estShares < 1 && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 px-3.5 py-2.5 text-xs leading-relaxed text-warn">
+                  <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                  <span>
+                    {formatINR(amount)} buys 0 shares — one {symbol} share costs{' '}
+                    {formatINR(price)}. Enter at least {formatINR(Math.ceil(price))}
+                    {Math.ceil(price) > maxInvestment
+                      ? `, but that exceeds your ${formatINR(maxInvestment)} max — raise it in Settings first.`
+                      : '.'}
+                  </span>
+                </div>
+              )}
+
               <p className="text-xs leading-relaxed text-muted">
                 Limits: {formatINR(minInvestment)} – {formatINR(maxInvestment)}.
                 Whole shares only (fractional amounts are floored).

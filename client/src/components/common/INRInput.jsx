@@ -1,8 +1,15 @@
+import { useEffect, useRef, useState } from 'react';
 import { cx, GLASS_PANEL, LABEL, NUM } from '../../lib/ui';
 
 /**
  * INRInput — glass currency field with a `₹` prefix and inline range validation.
  * Renders a validation message when the value falls outside `[min, max]`.
+ *
+ * Keeps an internal display-string so the user can fully clear / retype the
+ * field (clearing no longer snaps back to "0"). The string is re-synced from
+ * the numeric `value` prop whenever it changes externally (e.g. quick-amount
+ * chips or by-shares → amount conversions), and the parsed number is emitted on
+ * every edit (empty input → `0`).
  *
  * @param {Object} props
  * @param {number} props.value                       Current numeric value.
@@ -28,6 +35,28 @@ export default function INRInput({
   const numeric = Number(value);
   const isNumber = Number.isFinite(numeric);
 
+  // Internal display string lets the user clear/retype without snapping to "0".
+  const [display, setDisplay] = useState(() =>
+    isNumber && value !== '' && value != null ? String(numeric) : '',
+  );
+  // Tracks the last numeric value we emitted so we only re-sync the string when
+  // the prop changes from the OUTSIDE (chips / qty conversions), not echoes of
+  // our own onChange (where Number(display) already equals the prop).
+  const lastEmitted = useRef(numeric);
+
+  useEffect(() => {
+    const next = Number(value);
+    // If the incoming prop matches what the current string already parses to,
+    // the change is an echo of our own edit — keep the user's raw string
+    // (e.g. an empty field stays empty instead of becoming "0").
+    const current = display === '' ? 0 : Number(display);
+    if (Number.isFinite(next) && next !== current && next !== lastEmitted.current) {
+      setDisplay(Number.isFinite(next) ? String(next) : '');
+    }
+    lastEmitted.current = Number.isFinite(next) ? next : 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   let rangeError = '';
   if (isNumber) {
     if (hasMin && numeric < min) {
@@ -42,9 +71,12 @@ export default function INRInput({
 
   const handleChange = (e) => {
     const raw = e.target.value;
+    setDisplay(raw);
     // Allow clearing → emit 0; otherwise parse digits/decimal.
     const parsed = raw === '' ? 0 : Number(raw);
-    onChange(Number.isFinite(parsed) ? parsed : 0);
+    const safe = Number.isFinite(parsed) ? parsed : 0;
+    lastEmitted.current = safe;
+    onChange(safe);
   };
 
   return (
@@ -63,7 +95,7 @@ export default function INRInput({
         <input
           type="number"
           inputMode="numeric"
-          value={value ?? ''}
+          value={display}
           min={hasMin ? min : undefined}
           max={hasMax ? max : undefined}
           placeholder={placeholder}
