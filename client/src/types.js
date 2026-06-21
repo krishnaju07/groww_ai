@@ -3,6 +3,7 @@
  * @typedef {'BUY'|'SELL'} TradeAction
  * @typedef {'manual'|'automatic'} TradeType
  * @typedef {'OPEN'|'CLOSED'} TradeStatus
+ * @typedef {'paper'|'live'} TradingMode
  *
  * @typedef {Object} StockQuote
  * @property {string} symbol         canonical e.g. "RELIANCE", "NIFTY50"
@@ -51,6 +52,8 @@
  * @property {TradeType} tradeType
  * @property {string} [triggerReason]
  * @property {TradeStatus} status
+ * @property {TradingMode} [mode]
+ * @property {string} [brokerOrderId]
  * @property {number} [pnl]
  * @property {number} [pnlPercent]
  * @property {string} openedAt         ISO
@@ -85,6 +88,7 @@
  * @property {string} userId
  * @property {number} minInvestment
  * @property {number} maxInvestment
+ * @property {TradingMode} [tradingMode]
  * @property {AutoInvestSettings} autoInvest
  * @property {AutoExitSettings} autoExit
  * @property {string} updatedAt            ISO
@@ -149,5 +153,12 @@
  * @property {EquityPoint[]} equityCurve
  * @property {BacktestTrade[]} trades
  * @property {string} createdAt            ISO
+ *
+ * @typedef {Object} TradingModeStatus
+ * @property {TradingMode} mode
+ * @property {boolean} liveAvailable
+ * @property {boolean} liveEnabledEnv
+ * @property {boolean} hasToken
+ * @property {boolean} autoTradingInLive
  */
 export {};
