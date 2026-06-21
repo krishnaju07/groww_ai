@@ -1,0 +1,26 @@
+{
+  "name": "groww-ai-server",
+  "version": "1.0.0",
+  "description": "GrowwAI server — AI-powered Indian-equity paper-trading API (Express + Mongoose, ESM).",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "groww-ai": "file:..",
+    "mongoose": "^8.5.1",
+    "node-cron": "^3.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

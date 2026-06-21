@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Environment files (never commit secrets; commit only .env.example)
+.env
+*.env
+!.env.example
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Misc caches
+.cache/
+.vite/
+coverage/

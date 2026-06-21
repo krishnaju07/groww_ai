@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    margin: 0;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(900px 520px at 12% -12%, rgba(0, 200, 83, 0.1), transparent 60%),
+      radial-gradient(820px 520px at 100% -4%, rgba(59, 130, 246, 0.06), transparent 55%),
+      radial-gradient(640px 640px at 50% 118%, rgba(0, 200, 83, 0.05), transparent 60%);
+    background-attachment: fixed;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  /* Tabular figures, slightly tightened — use on every numeric value. */
+  .num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .text-glow-accent {
+    text-shadow: 0 0 18px rgba(0, 200, 83, 0.45);
+  }
+  .text-glow-danger {
+    text-shadow: 0 0 18px rgba(255, 82, 82, 0.4);
+  }
+  /* Plain-CSS mirror of GLASS_CARD for use outside JS recipe imports. */
+  .glass {
+    @apply rounded-2xl border border-white/[0.06] bg-gradient-to-b from-white/[0.05] to-white/[0.015] backdrop-blur-xl;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Refined custom scrollbar. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 200, 83, 0.3);
+  background-clip: padding-box;
+}
+
+/* Remove number-input spinners for a cleaner INR input. */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* Recharts: drop default focus outlines on active dots/surfaces. */
+.recharts-surface:focus,
+.recharts-wrapper:focus {
+  outline: none;
+}

@@ -1,0 +1,17 @@
+{
+  "name": "groww-ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GrowwAI — AI-powered Indian-equity paper-trading app (JavaScript/ESM monorepo).",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "dev": "concurrently -n server,client \"npm --prefix server run dev\" \"npm --prefix client run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
