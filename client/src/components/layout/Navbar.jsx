@@ -2,9 +2,11 @@ import { useEffect } from 'react';
 import { Activity } from 'lucide-react';
 import usePortfolioStore from '../../store/usePortfolioStore';
 import useStocksStore from '../../store/useStocksStore';
+import useTradingModeStore from '../../store/useTradingModeStore';
 import { formatINR, formatPercent, pnlColorClass } from '../../lib/format';
-import { cx, GRADIENT_TEXT, GLOW_ACCENT, PILL, LABEL, NUM } from '../../lib/ui';
+import { cx, GRADIENT_TEXT, GLOW_ACCENT, LABEL, NUM } from '../../lib/ui';
 import AnimatedNumber from '../common/AnimatedNumber';
+import TradingModeToggle from '../common/TradingModeToggle';
 
 /**
  * Top navigation bar.
@@ -19,6 +21,8 @@ export default function Navbar() {
   const fetchPortfolio = usePortfolioStore((s) => s.fetchPortfolio);
   const stocks = useStocksStore((s) => s.stocks);
   const fetchStocks = useStocksStore((s) => s.fetchStocks);
+  const tradingStatus = useTradingModeStore((s) => s.status);
+  const mode = tradingStatus ? tradingStatus.mode : 'paper';
 
   useEffect(() => {
     fetchPortfolio();
@@ -52,7 +56,14 @@ export default function Navbar() {
             <span className={GRADIENT_TEXT}>Groww</span>
             <span className="text-text">AI</span>
           </span>
-          <span className="text-[11px] text-muted">AI Paper Trading</span>
+          <span
+            className={cx(
+              'text-[11px]',
+              mode === 'live' ? 'font-semibold text-danger' : 'text-muted',
+            )}
+          >
+            {mode === 'live' ? 'LIVE · Real Money' : 'AI Paper Trading'}
+          </span>
         </div>
       </div>
 
@@ -110,18 +121,7 @@ export default function Navbar() {
             {formatINR(dayPnl)} ({formatPercent(dayPnlPercent)})
           </span>
         </div>
-        <div
-          className={cx(
-            PILL,
-            'border border-accent/25 bg-accent/10 text-accent'
-          )}
-        >
-          <span className="relative flex h-2.5 w-2.5 items-center justify-center">
-            <span className="absolute inline-flex h-2.5 w-2.5 animate-glow-pulse rounded-full bg-accent" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
-          </span>
-          <span>Live</span>
-        </div>
+        <TradingModeToggle />
       </div>
     </header>
   );

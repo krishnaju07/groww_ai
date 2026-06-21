@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, CheckCircle2, AlertCircle, Layers } from 'lucide-react';
+import { TrendingUp, TrendingDown, CheckCircle2, AlertCircle, AlertTriangle, Zap, Layers } from 'lucide-react';
 import StockSelector from './StockSelector';
 import SignalCard from './SignalCard';
 import INRInput from '../common/INRInput';
 import Spinner from '../common/Spinner';
+import Modal from '../common/Modal';
 import AnimatedNumber from '../common/AnimatedNumber';
 import Skeleton from '../common/Skeleton';
 import useStocksStore from '../../store/useStocksStore';
 import useSettingsStore from '../../store/useSettingsStore';
 import useSignalsStore from '../../store/useSignalsStore';
 import usePortfolioStore from '../../store/usePortfolioStore';
+import useTradingModeStore from '../../store/useTradingModeStore';
 import { executeManualTrade } from '../../services/trades.service';
 import { formatINR } from '../../lib/format';
 import {
@@ -17,6 +19,7 @@ import {
   GLASS_PANEL,
   GRADIENT_TEXT,
   BTN_PRIMARY,
+  BTN_GHOST,
   LABEL,
   NUM,
   cx,
@@ -46,12 +49,16 @@ export default function TradePanel() {
   const fetchSignal = useSignalsStore((s) => s.fetchSignal);
 
   const fetchPortfolio = usePortfolioStore((s) => s.fetchPortfolio);
+  const tradingStatus = useTradingModeStore((s) => s.status);
+  const fetchTradingStatus = useTradingModeStore((s) => s.fetchStatus);
+  const isLiveMode = (tradingStatus ? tradingStatus.mode : 'paper') === 'live';
 
   const [symbol, setSymbol] = useState('');
   const [action, setAction] = useState(/** @type {'BUY'|'SELL'} */ ('BUY'));
   const [amount, setAmount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(/** @type {{type:'success'|'error',message:string}|null} */ (null));
+  const [confirmLiveOpen, setConfirmLiveOpen] = useState(false);
 
   const minInvestment = settings ? settings.minInvestment : 5000;
   const maxInvestment = settings ? settings.maxInvestment : 50000;
@@ -68,6 +75,10 @@ export default function TradePanel() {
       setAmount(settings.minInvestment);
     }
   }, [settings, amount]);
+
+  useEffect(() => {
+    fetchTradingStatus();
+  }, [fetchTradingStatus]);
 
   // Fetch the AI signal for the selected symbol.
   useEffect(() => {
@@ -110,8 +121,8 @@ export default function TradePanel() {
     setResult(null);
   };
 
-  const handleConfirm = async () => {
-    if (!canSubmit) return;
+  const doSubmit = async () => {
+    setConfirmLiveOpen(false);
     setSubmitting(true);
     setResult(null);
     try {
@@ -136,6 +147,16 @@ export default function TradePanel() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleConfirm = () => {
+    if (!canSubmit) return;
+    // Live mode requires an explicit REAL MONEY confirmation per order.
+    if (isLiveMode) {
+      setConfirmLiveOpen(true);
+      return;
+    }
+    doSubmit();
   };
 
   const isBuy = action === 'BUY';
@@ -167,9 +188,18 @@ export default function TradePanel() {
             <h3 className="font-display text-base font-bold text-text">
               Place Order
             </h3>
-            <p className="mt-0.5 text-xs text-muted">Manual paper trade</p>
+            <p className="mt-0.5 text-xs text-muted">
+              {isLiveMode ? 'Real-money order via Groww' : 'Manual paper trade'}
+            </p>
           </div>
         </div>
+
+        {isLiveMode && (
+          <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-xs font-semibold text-danger">
+            <AlertTriangle size={16} className="shrink-0" />
+            REAL MONEY — this order executes on your Groww account.
+          </div>
+        )}
 
         <div className="flex flex-col gap-4">
           <StockSelector
@@ -309,7 +339,7 @@ export default function TradePanel() {
             {submitting && <Spinner size="sm" />}
             {submitting
               ? 'Placing…'
-              : `Place ${action}${symbol ? ` ${symbol}` : ''}`}
+              : `${isLiveMode ? 'Place LIVE ' : 'Place '}${action}${symbol ? ` ${symbol}` : ''}`}
           </button>
         </div>
       </div>
@@ -319,6 +349,50 @@ export default function TradePanel() {
         <h3 className={cx(LABEL, 'px-1')}>AI Signal</h3>
         <SignalCard signal={signal} loading={signalsLoading} />
       </div>
+
+      {/* REAL MONEY per-order confirmation (live mode only) */}
+      <Modal
+        open={confirmLiveOpen}
+        title="Confirm REAL MONEY order"
+        onClose={() => setConfirmLiveOpen(false)}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex items-start gap-3 rounded-xl border border-danger/30 bg-danger/10 p-3.5 text-sm text-danger">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+            <p className="leading-relaxed">
+              Place a <b>real {action}</b> for <b>{symbol}</b>
+              {action === 'BUY' ? (
+                <>
+                  {' '}
+                  (≈ {estShares} {estShares === 1 ? 'share' : 'shares'}, {formatINR(amount)})
+                </>
+              ) : (
+                <> (entire holding)</>
+              )}{' '}
+              on your Groww account. This uses real funds and cannot be undone here.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className={BTN_GHOST}
+              onClick={() => setConfirmLiveOpen(false)}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={doSubmit}
+              disabled={submitting}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-danger to-[#FF7A7A] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_4px_20px_-4px_rgba(255,82,82,0.6)] transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
+            >
+              {submitting ? <Spinner size="sm" /> : <Zap size={16} />}
+              Place real {action}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
