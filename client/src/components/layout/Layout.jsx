@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
 import ToastContainer from '../common/ToastContainer';
@@ -40,6 +40,7 @@ function isTypingTarget(target) {
  * @returns {JSX.Element}
  */
 export default function Layout() {
+  const location = useLocation();
   const togglePalette = useUiStore((s) => s.togglePalette);
   const openPalette = useUiStore((s) => s.openPalette);
   const mobileNavOpen = useUiStore((s) => s.mobileNavOpen);
@@ -118,7 +119,11 @@ export default function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Navbar />
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1400px] animate-fade-in-up p-6">
+          {/* Keyed by route so each page eases in on navigation (smooth transitions). */}
+          <div
+            key={location.pathname}
+            className="mx-auto max-w-[1400px] animate-fade-in-up p-6"
+          >
             <Outlet />
           </div>
         </main>
