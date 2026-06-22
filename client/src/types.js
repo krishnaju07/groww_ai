@@ -34,12 +34,19 @@
  * @property {number} sma20
  * @property {number} sma50
  *
- * @typedef {Object} AISignal
- * @property {string} symbol
+ * @typedef {Object} AIModelVote
+ * @property {string} name            model label, e.g. "Quant" | "Claude"
  * @property {SignalType} signal
  * @property {number} confidence      0..100
  * @property {string} reason
+ *
+ * @typedef {Object} AISignal
+ * @property {string} symbol
+ * @property {SignalType} signal      ensemble (blended) signal
+ * @property {number} confidence      0..100 (blended)
+ * @property {string} reason
  * @property {SignalIndicators} indicators
+ * @property {AIModelVote[]} [models] per-model breakdown (Quant + optional Claude)
  * @property {string} generatedAt     ISO
  *
  * @typedef {Object} Trade

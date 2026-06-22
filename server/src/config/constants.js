@@ -48,3 +48,26 @@ export const SIGNAL = { buyThreshold: 20, sellThreshold: -20 };
 export const PRICE_CACHE_TTL_MS = 15_000;
 export const HISTORY_CACHE_TTL_MS = 5 * 60_000;
 export const AUTO_TRADING_CRON = '*/30 * * * * *'; // every 30s
+
+// AI signal ensemble. The final signal blends the deterministic technical "Quant"
+// model with a Claude LLM model. `quantWeight` is the Quant model's share of the
+// blended confidence when both models agree (the LLM gets 1 - quantWeight).
+export const AI = {
+  quantWeight: 0.5, // 0..1 — Quant vs Claude weight in the blended confidence
+  agreementBoost: 6, // confidence bump (capped at 100) when both models agree
+  conflictConfidence: 40, // confidence assigned when BUY vs SELL directly conflict → HOLD
+  llmCacheTtlMs: 5 * 60_000, // per-symbol cache for LLM verdicts
+  llmHistoryDays: 90, // candles fed to the indicator computation
+  llmRecentCandles: 14, // recent OHLCV rows summarised for the LLM prompt
+  llmMaxTokens: 1024, // small structured JSON verdict
+  llmTimeoutMs: 20_000, // per-request timeout; on timeout we fall back to Quant
+};
+
+// AI-driven LIVE (real-money) trading gates. These only ever apply when live mode
+// is fully configured + armed (ENABLE_LIVE_TRADING + ENABLE_LIVE_AUTO_TRADING +
+// a Groww token + user in live mode). The defaults are deliberately conservative.
+export const AI_LIVE = {
+  requireModelAgreement: true, // a real order needs BOTH Quant and Claude to agree
+  exitConfidence: 70, // min ensemble confidence for an AI-driven live exit
+  maxBuysPerCycle: 1, // at most N new live BUYs opened per auto-trading cycle
+};

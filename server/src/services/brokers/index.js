@@ -11,12 +11,13 @@
 
 import { env } from '../../config/env.js';
 import { growwBroker } from './GrowwBroker.js';
+import { hasGrowwCredentials } from './growwAuth.js';
 
 export { growwBroker };
 
 /** @returns {boolean} server is fully configured + enabled for live trading. */
 export function isLiveConfigured() {
-  return env.ENABLE_LIVE_TRADING === true && Boolean(env.GROWW_ACCESS_TOKEN);
+  return env.ENABLE_LIVE_TRADING === true && hasGrowwCredentials();
 }
 
 /**

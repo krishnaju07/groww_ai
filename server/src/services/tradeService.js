@@ -137,7 +137,7 @@ export function mapPositionDoc(doc, quote) {
 export async function executeTrade({ userId, symbol, action, investmentAmount, quantity, tradeType, triggerReason }) {
   const settings = await UserSettings.findOne({ userId });
   if (effectiveMode(settings) === 'live') {
-    return executeLiveTrade({ userId, symbol, action, investmentAmount, quantity, tradeType, triggerReason });
+    return executeLiveTrade({ userId, symbol, action, investmentAmount, quantity, tradeType, triggerReason, settings });
   }
 
   const user = await User.findById(userId);
@@ -158,10 +158,10 @@ export async function executeTrade({ userId, symbol, action, investmentAmount, q
  * with mode:'live' + the broker order id; does NOT touch the paper cash balance
  * or paper Position collection — live holdings live on the Groww account.
  *
- * @param {{ userId:string, symbol:string, action:TradeAction, investmentAmount?:number, quantity?:number, tradeType:TradeType, triggerReason?:string }} args
+ * @param {{ userId:string, symbol:string, action:TradeAction, investmentAmount?:number, quantity?:number, tradeType:TradeType, triggerReason?:string, settings?:* }} args
  * @returns {Promise<Trade>}
  */
-async function executeLiveTrade({ userId, symbol, action, investmentAmount, quantity, tradeType, triggerReason }) {
+async function executeLiveTrade({ userId, symbol, action, investmentAmount, quantity, tradeType, triggerReason, settings }) {
   assertLiveAllowed();
   if (tradeType === 'automatic' && env.ENABLE_LIVE_AUTO_TRADING !== true) {
     throw codedError('Automatic AI trading is disabled in live mode for safety', 'LIVE_AUTO_DISABLED');
@@ -172,7 +172,13 @@ async function executeLiveTrade({ userId, symbol, action, investmentAmount, quan
 
   let qty = Math.floor(Number(quantity) || 0);
   if (action === 'BUY') {
-    qty = Math.floor(Number(investmentAmount) / quote.price);
+    // Hard blast-radius cap: never let a single live BUY exceed LIVE_MAX_ORDER_VALUE.
+    const requested = Number(investmentAmount);
+    const capped = Math.min(requested, env.LIVE_MAX_ORDER_VALUE);
+    if (capped < requested) {
+      console.warn(`[liveTrade] ${symbol} order capped ₹${requested} -> ₹${capped} (LIVE_MAX_ORDER_VALUE)`);
+    }
+    qty = Math.floor(capped / quote.price);
     if (!Number.isFinite(qty) || qty < 1) {
       throw codedError('Investment amount too small to buy a single share', 'INSUFFICIENT_AMOUNT');
     }
@@ -213,7 +219,55 @@ async function executeLiveTrade({ userId, symbol, action, investmentAmount, quan
     brokerOrderId: payload.groww_order_id,
     openedAt: now,
   });
+
+  // Best-effort: arm a native Groww GTT stop-loss so an AI-opened live position is
+  // never left without a stop. Opt-in (LIVE_ARM_GTT_STOPLOSS) and non-fatal — a
+  // failure to arm is logged loudly but does not undo the (already placed) BUY.
+  if (
+    action === 'BUY' &&
+    env.LIVE_ARM_GTT_STOPLOSS === true &&
+    settings?.autoExit?.enabled &&
+    Number(settings.autoExit.stopLossPercent) > 0
+  ) {
+    await armGttStopLoss(u, qty, quote.price, Number(settings.autoExit.stopLossPercent));
+  }
+
   return mapTradeDoc(tradeDoc);
+}
+
+/**
+ * Arm a native Groww GTT stop-loss (SELL, triggered DOWN) for a freshly opened
+ * live position. Never throws. (CASH supports GTT; OCO is FNO-only, so a single
+ * GTT stop is the usable native protection for equities.)
+ * @param {*} u  STOCK_UNIVERSE entry
+ * @param {number} qty
+ * @param {number} refPrice  reference price (live quote at fill)
+ * @param {number} stopPct
+ * @returns {Promise<void>}
+ */
+async function armGttStopLoss(u, qty, refPrice, stopPct) {
+  const triggerPrice = round2(refPrice * (1 - stopPct / 100));
+  try {
+    const gtt = await growwBroker.createGttOrder({
+      referenceId: makeReferenceId(),
+      tradingSymbol: u.gtsym,
+      segment: u.gseg,
+      exchange: u.gexch,
+      quantity: qty,
+      triggerPrice,
+      triggerDirection: 'DOWN',
+      order: { orderType: 'MARKET', transactionType: 'SELL' },
+      productType: GROWW_ORDER.product,
+      duration: 'DAY',
+    });
+    console.log(
+      `[liveTrade] armed GTT stop-loss ${u.symbol} @ ₹${triggerPrice} (-${stopPct}%) → ${gtt?.smart_order_id ?? 'ok'}`,
+    );
+  } catch (err) {
+    console.warn(
+      `[liveTrade] FAILED to arm GTT stop-loss for ${u.symbol}: ${err.message} — position is LIVE WITHOUT an auto stop`,
+    );
+  }
 }
 
 /**

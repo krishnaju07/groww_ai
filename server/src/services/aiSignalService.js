@@ -111,10 +111,11 @@ function buildReason({ rsiVal, histogram, mom, volRatio, sma20, sma50, signal })
 
 /**
  * Compute the full indicator set for a symbol from its recent history.
+ * Exported so the ensemble engine reuses the EXACT same indicator computation.
  * @param {string} symbol
  * @returns {Promise<SignalIndicators>}
  */
-async function computeIndicators(symbol) {
+export async function computeIndicators(symbol) {
   const candles = await marketData.getHistory(symbol, 90);
   const closes = candles.map((c) => c.close);
   const volumes = candles.map((c) => c.volume);
@@ -134,10 +135,11 @@ async function computeIndicators(symbol) {
 
 /**
  * Round all indicator fields for presentation.
+ * Exported so the ensemble engine presents indicators identically.
  * @param {SignalIndicators} ind
  * @returns {SignalIndicators}
  */
-function roundIndicators(ind) {
+export function roundIndicators(ind) {
   return {
     rsi: round(ind.rsi, 2),
     macd: round(ind.macd, 4),

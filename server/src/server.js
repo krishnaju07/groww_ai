@@ -8,6 +8,7 @@ import { defaultUser } from './middleware/defaultUser.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { marketData } from './services/marketData/index.js';
 import { isLiveConfigured } from './services/brokers/index.js';
+import { aiStatus } from './services/ai/ensembleSignalService.js';
 import apiRouter from './routes/index.js';
 import { ensureSeedData } from './models/seed.js';
 import { startAutoTradingJob } from './jobs/autoTradingJob.js';
@@ -44,6 +45,7 @@ app.get('/api/health', (_req, res) => {
       hasToken: Boolean(env.GROWW_ACCESS_TOKEN),
       available: isLiveConfigured(),
     },
+    ai: aiStatus(),
   });
 });
 

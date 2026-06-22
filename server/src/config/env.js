@@ -35,10 +35,29 @@ const envSchema = z.object({
   GROWW_ACCESS_TOKEN: z.string().optional().default(''),
   GROWW_API_KEY: z.string().optional().default(''),
   GROWW_API_SECRET: z.string().optional().default(''),
+  GROWW_TOTP_SECRET: z.string().optional().default(''),
   IGNORE_MARKET_HOURS: boolFromString(true),
   AUTO_TRADING_ENABLED: boolFromString(true),
   ENABLE_LIVE_TRADING: boolFromString(false),
   ENABLE_LIVE_AUTO_TRADING: boolFromString(false),
+  // Hard per-order value cap (₹) for LIVE orders — limits blast radius if AI
+  // trading is armed. Applies to every live BUY (manual or automatic).
+  LIVE_MAX_ORDER_VALUE: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : 5000;
+    }),
+  // Opt-in: arm a native Groww GTT stop-loss right after each live BUY so an
+  // AI-opened real position is never left without a stop. Default OFF.
+  LIVE_ARM_GTT_STOPLOSS: boolFromString(false),
+  // AI model (LLM reasoning layer). When ANTHROPIC_API_KEY is empty or
+  // AI_LLM_ENABLED=false, the signal engine transparently falls back to the
+  // deterministic quant model — so the app always works without a key.
+  ANTHROPIC_API_KEY: z.string().optional().default(''),
+  AI_MODEL: z.string().optional().default('claude-opus-4-8'),
+  AI_LLM_ENABLED: boolFromString(true),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -56,8 +75,16 @@ const parsed = envSchema.safeParse(process.env);
  *   GROWW_ACCESS_TOKEN: string,
  *   GROWW_API_KEY: string,
  *   GROWW_API_SECRET: string,
+ *   GROWW_TOTP_SECRET: string,
  *   IGNORE_MARKET_HOURS: boolean,
  *   AUTO_TRADING_ENABLED: boolean,
+ *   ENABLE_LIVE_TRADING: boolean,
+ *   ENABLE_LIVE_AUTO_TRADING: boolean,
+ *   LIVE_MAX_ORDER_VALUE: number,
+ *   LIVE_ARM_GTT_STOPLOSS: boolean,
+ *   ANTHROPIC_API_KEY: string,
+ *   AI_MODEL: string,
+ *   AI_LLM_ENABLED: boolean,
  * }>}
  */
 export const env = Object.freeze(
@@ -72,10 +99,16 @@ export const env = Object.freeze(
         GROWW_ACCESS_TOKEN: '',
         GROWW_API_KEY: '',
         GROWW_API_SECRET: '',
+        GROWW_TOTP_SECRET: '',
         IGNORE_MARKET_HOURS: true,
         AUTO_TRADING_ENABLED: true,
         ENABLE_LIVE_TRADING: false,
         ENABLE_LIVE_AUTO_TRADING: false,
+        LIVE_MAX_ORDER_VALUE: 5000,
+        LIVE_ARM_GTT_STOPLOSS: false,
+        ANTHROPIC_API_KEY: '',
+        AI_MODEL: 'claude-opus-4-8',
+        AI_LLM_ENABLED: true,
       },
 );
 

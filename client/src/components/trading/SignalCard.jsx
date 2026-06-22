@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Gauge, Layers } from 'lucide-react';
+import { Activity, BarChart3, Cpu, Gauge, Layers } from 'lucide-react';
 import SignalBadge from '../common/SignalBadge';
 import ConfidenceMeter from '../common/ConfidenceMeter';
 import InfoHint from '../common/InfoHint';
@@ -68,6 +68,7 @@ export default function SignalCard({ signal, loading = false }) {
   }
 
   const ind = signal.indicators || {};
+  const models = Array.isArray(signal.models) ? signal.models : [];
 
   const indicators = [
     { label: 'RSI (14)', value: fmt(ind.rsi, 1), Icon: Gauge },
@@ -98,6 +99,31 @@ export default function SignalCard({ signal, loading = false }) {
           </div>
         </div>
       </div>
+
+      {models.length > 0 && (
+        <div className="mt-4">
+          <div className="flex items-center gap-1.5">
+            <Cpu size={13} className="text-muted/80" />
+            <span className={LABEL}>
+              {models.length > 1 ? 'Model Consensus' : 'Model'}
+            </span>
+          </div>
+          <div className="mt-2 flex flex-col gap-2">
+            {models.map((m) => (
+              <div
+                key={m.name}
+                className={cx(GLASS_PANEL, 'flex items-center gap-3 px-3.5 py-2.5')}
+                title={m.reason}
+              >
+                <span className="w-16 shrink-0 text-xs font-semibold text-text">
+                  {m.name}
+                </span>
+                <SignalBadge signal={m.signal} confidence={m.confidence} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 grid grid-cols-2 gap-2.5">
         {indicators.map(({ label, value, Icon }) => (

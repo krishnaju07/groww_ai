@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { getPortfolio, getEquityCurve } from '../services/portfolioService.js';
-import { getTopSignals } from '../services/aiSignalService.js';
+import { getTopEnsembleSignals } from '../services/ai/ensembleSignalService.js';
 import { mapTradeDoc } from '../services/tradeService.js';
 import Trade from '../models/Trade.js';
 import { loadSettingsDoc } from './settings.routes.js';
@@ -34,7 +34,7 @@ router.get(
       await Promise.all([
         getPortfolio(userId),
         getEquityCurve(userId, 30),
-        getTopSignals(3),
+        getTopEnsembleSignals(3),
         Trade.find({ userId }).sort({ createdAt: -1 }).limit(10).lean(),
         Trade.find({ userId, tradeType: 'automatic' })
           .sort({ createdAt: -1 })

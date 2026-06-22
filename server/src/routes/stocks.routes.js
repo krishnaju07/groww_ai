@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { STOCK_UNIVERSE } from '../config/constants.js';
 import { marketData } from '../services/marketData/index.js';
-import { getSignal } from '../services/aiSignalService.js';
+import { getEnsembleSignal } from '../services/ai/ensembleSignalService.js';
 
 const router = Router();
 
@@ -44,14 +44,14 @@ router.get(
 );
 
 /**
- * GET /api/stocks/:symbol/signal — AI signal for a symbol.
+ * GET /api/stocks/:symbol/signal — ensemble AI signal (Quant + Claude) for a symbol.
  * @returns {import('../types.js').AISignal} data
  */
 router.get(
   '/:symbol/signal',
   asyncHandler(async (req, res) => {
     const symbol = assertSymbol(req.params.symbol);
-    const data = await getSignal(symbol);
+    const data = await getEnsembleSignal(symbol);
     res.json({ success: true, data });
   }),
 );
