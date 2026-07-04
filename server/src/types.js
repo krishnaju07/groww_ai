@@ -73,8 +73,11 @@
  * @property {number} rsi
  * @property {{macd:number, signal:number, histogram:number}} macd
  * @property {number} volumeRatio
- * @property {'UP'|'DOWN'|'SIDEWAYS'} trend
+ * @property {'UP'|'DOWN'|'SIDEWAYS'} trendShortTerm 5m-candle trend
+ * @property {'UP'|'DOWN'|'SIDEWAYS'} trendMediumTerm 15m-candle trend
  * @property {{support:number, resistance:number}} levels
+ * @property {string} sector
+ * @property {number} sectorRelativeStrength this stock's day momentum minus its sector peers' average, in percent
  * @property {string} niftySentiment
  */
 

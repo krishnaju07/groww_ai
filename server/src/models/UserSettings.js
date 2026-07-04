@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { BROKERS, TRADING_MODES } from '../config/constants.js';
+import { BROKERS, TRADING_MODES, AI_PROVIDERS } from '../config/constants.js';
 
 const UserSettingsSchema = new mongoose.Schema(
   {
@@ -7,6 +7,7 @@ const UserSettingsSchema = new mongoose.Schema(
 
     tradingMode: { type: String, enum: TRADING_MODES, default: 'paper' },
     activeBroker: { type: String, enum: BROKERS, default: 'paper' },
+    aiProvider: { type: String, enum: AI_PROVIDERS, default: 'openai' },
 
     minInvestment: { type: Number, default: 1000 },
     maxInvestment: { type: Number, default: 20000 },
@@ -15,6 +16,9 @@ const UserSettingsSchema = new mongoose.Schema(
       enabled: { type: Boolean, default: false },
       amountPerTrade: { type: Number, default: 5000 },
       maxOpenPositions: { type: Number, default: 3 },
+      // When true, a quant BUY/SELL signal must also be confirmed by the configured
+      // LLM (aiProvider) before the auto-trading cron will place it — see autoTradingService.js.
+      requireAiConfirmation: { type: Boolean, default: true },
     },
     autoExit: {
       enabled: { type: Boolean, default: true },

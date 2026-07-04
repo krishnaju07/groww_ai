@@ -22,7 +22,8 @@ export function buildSystemPrompt() {
     'Given the indicator snapshot for one symbol, decide BUY, SELL, or WAIT.',
     'quantity is your suggested share count assuming a moderate ~₹5000 position for a BUY/SELL (0 for WAIT).',
     'stopLoss and target are absolute prices. reason is one concise sentence citing the specific signals that',
-    'drove the call (RSI, MACD, volume, trend, support/resistance, Nifty sentiment). confidence is 0-100.',
+    'drove the call (RSI, MACD, volume, both trend readings, sector-relative strength, support/resistance,',
+    'Nifty sentiment). confidence is 0-100.',
   ].join(' ');
 }
 
@@ -33,8 +34,9 @@ export function buildUserContent(symbol, ctx) {
     `RSI(14): ${ctx.rsi}`,
     `MACD: macd=${ctx.macd.macd} signal=${ctx.macd.signal} histogram=${ctx.macd.histogram}`,
     `Volume vs 20-period average: ${ctx.volumeRatio}x`,
-    `Short-term trend: ${ctx.trend}`,
+    `Short-term (5m) trend: ${ctx.trendShortTerm} | Medium-term (15m) trend: ${ctx.trendMediumTerm}`,
     `Support: ₹${ctx.levels.support} | Resistance: ₹${ctx.levels.resistance}`,
+    `Sector: ${ctx.sector} | Relative strength vs sector peers: ${ctx.sectorRelativeStrength > 0 ? '+' : ''}${ctx.sectorRelativeStrength}%`,
     ctx.niftySentiment,
     '',
     'Decision: BUY, SELL, or WAIT?',

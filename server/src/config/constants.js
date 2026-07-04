@@ -1,19 +1,19 @@
 export const DEFAULT_USER_ID = 'default-user';
 
-/** Curated NSE universe the app tracks/trades. Symbols are NSE trading symbols (no exchange suffix). */
+/** Curated NSE universe the app tracks/trades. Symbols are NSE trading symbols (no exchange suffix). `sector` powers sector-relative-strength context for the AI decision engine (sectorContext.js). */
 export const STOCK_UNIVERSE = [
-  { symbol: 'RELIANCE', name: 'Reliance Industries', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'TCS', name: 'Tata Consultancy Services', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'INFY', name: 'Infosys', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'HDFCBANK', name: 'HDFC Bank', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'ICICIBANK', name: 'ICICI Bank', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'SBIN', name: 'State Bank of India', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'TATAMOTORS', name: 'Tata Motors', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'ITC', name: 'ITC Limited', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'AXISBANK', name: 'Axis Bank', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'BHARTIARTL', name: 'Bharti Airtel', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'WIPRO', name: 'Wipro', exchange: 'NSE', segment: 'CASH' },
-  { symbol: 'HINDUNILVR', name: 'Hindustan Unilever', exchange: 'NSE', segment: 'CASH' },
+  { symbol: 'RELIANCE', name: 'Reliance Industries', exchange: 'NSE', segment: 'CASH', sector: 'Energy' },
+  { symbol: 'TCS', name: 'Tata Consultancy Services', exchange: 'NSE', segment: 'CASH', sector: 'IT' },
+  { symbol: 'INFY', name: 'Infosys', exchange: 'NSE', segment: 'CASH', sector: 'IT' },
+  { symbol: 'HDFCBANK', name: 'HDFC Bank', exchange: 'NSE', segment: 'CASH', sector: 'Banking' },
+  { symbol: 'ICICIBANK', name: 'ICICI Bank', exchange: 'NSE', segment: 'CASH', sector: 'Banking' },
+  { symbol: 'SBIN', name: 'State Bank of India', exchange: 'NSE', segment: 'CASH', sector: 'Banking' },
+  { symbol: 'TATAMOTORS', name: 'Tata Motors', exchange: 'NSE', segment: 'CASH', sector: 'Auto' },
+  { symbol: 'ITC', name: 'ITC Limited', exchange: 'NSE', segment: 'CASH', sector: 'FMCG' },
+  { symbol: 'AXISBANK', name: 'Axis Bank', exchange: 'NSE', segment: 'CASH', sector: 'Banking' },
+  { symbol: 'BHARTIARTL', name: 'Bharti Airtel', exchange: 'NSE', segment: 'CASH', sector: 'Telecom' },
+  { symbol: 'WIPRO', name: 'Wipro', exchange: 'NSE', segment: 'CASH', sector: 'IT' },
+  { symbol: 'HINDUNILVR', name: 'Hindustan Unilever', exchange: 'NSE', segment: 'CASH', sector: 'FMCG' },
 ];
 
 export const NIFTY_INDEX_SYMBOL = 'NIFTY 50';
@@ -29,6 +29,9 @@ export const ACTIONS = /** @type {const} */ (['BUY', 'SELL']);
 
 /** AI decision actions (WAIT = no trade proposed). */
 export const AI_ACTIONS = /** @type {const} */ (['BUY', 'SELL', 'WAIT']);
+
+/** LLM providers the decision engine can call — switchable live from Settings. */
+export const AI_PROVIDERS = /** @type {const} */ (['claude', 'openai']);
 
 export const ORDER_STATUSES = /** @type {const} */ ([
   'PENDING',

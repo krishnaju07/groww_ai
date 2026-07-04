@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { decide } from '../services/ai/decisionEngine.js';
 import { AIDecisionLog } from '../models/AIDecisionLog.js';
+import { Trade } from '../models/Trade.js';
+import { getAllSignals } from '../services/ai/signalCache.js';
 import { STOCK_UNIVERSE } from '../config/constants.js';
+import { round2 } from '../utils/format.js';
 
 export const aiRoutes = Router();
 
@@ -30,5 +33,33 @@ aiRoutes.get(
     if (req.query.action) filter.action = req.query.action;
     const data = await AIDecisionLog.find(filter).sort({ createdAt: -1 }).limit(limit).lean();
     res.json({ success: true, data });
+  }),
+);
+
+/** Latest AI signal per symbol, from the background scan (aiScanJob) — powers Dashboard top picks, watchlist badges, and Portfolio exit hints. */
+aiRoutes.get(
+  '/signals',
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: getAllSignals() });
+  }),
+);
+
+/** Win-rate aggregate across every AI/ensemble-triggered trade that has since closed. */
+aiRoutes.get(
+  '/stats',
+  asyncHandler(async (req, res) => {
+    const closedAiTrades = await Trade.find({ userId: req.userId, aiDecisionId: { $ne: null }, status: 'CLOSED' }).lean();
+    const totalClosed = closedAiTrades.length;
+    const winCount = closedAiTrades.filter((t) => (t.pnl || 0) > 0).length;
+    const totalPnl = closedAiTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+    res.json({
+      success: true,
+      data: {
+        totalClosed,
+        winCount,
+        winRate: totalClosed ? round2((winCount / totalClosed) * 100) : 0,
+        avgPnl: totalClosed ? round2(totalPnl / totalClosed) : 0,
+      },
+    });
   }),
 );

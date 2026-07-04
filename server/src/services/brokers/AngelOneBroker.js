@@ -96,8 +96,12 @@ export function createAngelOneBroker(userId) {
       return (res.data ?? []).map((o) => ({
         brokerOrderId: o.orderid,
         status: mapStatus(o.status),
+        symbol: o.tradingsymbol?.replace(/-EQ$/, ''),
+        action: o.transactiontype,
+        quantity: Number(o.quantity) || undefined,
         filledPrice: Number(o.averageprice) || undefined,
         filledQuantity: Number(o.filledshares) || undefined,
+        createdAt: o.updatetime ? new Date(o.updatetime) : null,
       }));
     },
 

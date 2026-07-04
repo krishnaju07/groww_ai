@@ -8,12 +8,105 @@
 import { env } from '../config/env.js';
 import { UserSettings } from '../models/UserSettings.js';
 import { Order } from '../models/Order.js';
+import { Trade } from '../models/Trade.js';
+import { Position } from '../models/Position.js';
 import { marketData } from './marketData/index.js';
 import { canTrade } from './risk/riskManager.js';
 import { effectiveMode, assertLiveAllowed } from './brokers/tradingModeService.js';
 import { brokerFor } from './brokers/registry.js';
 import { generateIdempotencyKey } from '../utils/idempotency.js';
 import { round2 } from '../utils/format.js';
+
+/**
+ * PaperBroker keeps its own Trade/Position bookkeeping internally (it has no
+ * separate real broker to defer to). Real broker adapters don't — so a live
+ * fill has to be recorded here, the one place every order (any broker) passes
+ * through. Without this, the risk manager's daily trade-count/loss-limit
+ * checks (which read the Trade collection) would never see live trades, and
+ * "Recent Trades"/the equity curve would silently only ever show paper activity.
+ * Only handles orders the broker reports as immediately FILLED with a known
+ * price (true for MARKET orders on NSE cash equity in practice) — a LIMIT
+ * order left PLACED/PENDING isn't recorded yet since there's no fill price;
+ * that would need order-status polling/webhooks to backfill later.
+ * @param {string} userId @param {string} brokerName
+ * @param {{symbol:string, action:'BUY'|'SELL', quantity:number, stopLoss?:number, target?:number, source:string, triggerReason?:string, aiDecisionId?:string}} input
+ * @param {{status:string, filledPrice?:number, filledQuantity?:number}} result
+ */
+async function recordLiveFill(userId, brokerName, input, result) {
+  if (result.status !== 'FILLED' || !result.filledPrice) return;
+
+  const price = result.filledPrice;
+  const quantity = result.filledQuantity || input.quantity;
+
+  if (input.action === 'BUY') {
+    const investmentAmount = round2(price * quantity);
+    await Trade.create({
+      userId,
+      broker: brokerName,
+      mode: 'live',
+      symbol: input.symbol,
+      action: 'BUY',
+      quantity,
+      price,
+      investmentAmount,
+      tradeSource: input.source,
+      triggerReason: input.triggerReason ?? '',
+      status: 'OPEN',
+      aiDecisionId: input.aiDecisionId ?? null,
+    });
+
+    const existing = await Position.findOne({ userId, broker: brokerName, symbol: input.symbol });
+    const newQuantity = (existing?.quantity ?? 0) + quantity;
+    const newInvestedAmount = round2((existing?.investedAmount ?? 0) + investmentAmount);
+    await Position.findOneAndUpdate(
+      { userId, broker: brokerName, symbol: input.symbol },
+      {
+        quantity: newQuantity,
+        investedAmount: newInvestedAmount,
+        avgBuyPrice: round2(newInvestedAmount / newQuantity),
+        highestPriceSeen: Math.max(existing?.highestPriceSeen ?? 0, price),
+        stopLoss: input.stopLoss ?? existing?.stopLoss ?? null,
+        target: input.target ?? existing?.target ?? null,
+        $setOnInsert: { openedAt: new Date() },
+      },
+      { upsert: true },
+    );
+    return;
+  }
+
+  // SELL
+  const position = await Position.findOne({ userId, broker: brokerName, symbol: input.symbol });
+  const proceeds = round2(price * quantity);
+  const costBasis = position ? round2(position.avgBuyPrice * quantity) : proceeds;
+  const pnl = round2(proceeds - costBasis);
+
+  await Trade.create({
+    userId,
+    broker: brokerName,
+    mode: 'live',
+    symbol: input.symbol,
+    action: 'SELL',
+    quantity,
+    price,
+    investmentAmount: proceeds,
+    tradeSource: input.source,
+    triggerReason: input.triggerReason ?? '',
+    status: 'CLOSED',
+    pnl,
+    pnlPercent: costBasis ? round2((pnl / costBasis) * 100) : 0,
+    aiDecisionId: input.aiDecisionId ?? null,
+    closedAt: new Date(),
+  });
+
+  if (position) {
+    const remaining = position.quantity - quantity;
+    if (remaining <= 0) {
+      await Position.deleteOne({ _id: position._id });
+    } else {
+      await Position.updateOne({ _id: position._id }, { $inc: { quantity: -quantity, investedAmount: -costBasis } });
+    }
+  }
+}
 
 function codedError(message, code, status = 400) {
   const e = new Error(message);
@@ -129,6 +222,16 @@ export async function placeOrder(userId, input) {
     orderDoc.brokerOrderId = result.brokerOrderId;
     orderDoc.status = result.status;
     await orderDoc.save();
+
+    if (mode === 'live') {
+      try {
+        await recordLiveFill(userId, brokerName, input, result);
+      } catch (err) {
+        // Never let bookkeeping failure hide a real broker fill from the caller —
+        // the order already went through; log loudly and move on.
+        console.error(`[orderService] recordLiveFill failed for order ${orderDoc._id}:`, err);
+      }
+    }
 
     return {
       orderId: String(orderDoc._id),

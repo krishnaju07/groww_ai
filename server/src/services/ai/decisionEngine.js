@@ -1,29 +1,34 @@
 /**
- * Claude-driven decision engine. Flow: buildContext -> (Claude + Quant) -> persist
+ * LLM-driven decision engine. Flow: buildContext -> (LLM + Quant) -> persist
  * AIDecisionLog (always, even WAIT) -> caller runs riskManager.canTrade() -> orderService.
- * Claude is advisory; the Quant scorer (aiSignalService.js) runs alongside as a cheap
- * cross-check. A malformed/out-of-range Claude response is never trusted as-is — it's
- * clamped/validated or discarded in favor of the Quant result, never turned into an order.
+ * The LLM provider (Claude or OpenAI) is a live per-user toggle (UserSettings.aiProvider,
+ * switchable from Settings without a restart) — advisory only; the Quant scorer
+ * (aiSignalService.js) runs alongside as a cheap cross-check. A malformed/out-of-range
+ * LLM response is never trusted as-is — it's clamped/validated or discarded in favor of
+ * the Quant result, never turned into an order.
  */
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { env } from '../../config/env.js';
+import { UserSettings } from '../../models/UserSettings.js';
 import { buildContext } from './contextBuilder.js';
 import { buildSystemPrompt, buildUserContent, DECISION_SCHEMA } from './decisionPrompt.js';
 import { scoreQuant } from './aiSignalService.js';
 import { AIDecisionLog } from '../../models/AIDecisionLog.js';
 import { round2 } from '../../utils/format.js';
 
-const client = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
+const anthropicClient = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
+const openaiClient = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
 
-function sanitizeDecision(raw) {
+function sanitizeDecision(raw, providerLabel) {
   if (!raw || !['BUY', 'SELL', 'WAIT'].includes(raw.action)) {
-    throw new Error('Claude response missing a valid action');
+    throw new Error(`${providerLabel} response missing a valid action`);
   }
   const quantity = Math.max(0, Math.floor(Number(raw.quantity) || 0));
   const stopLoss = Number(raw.stopLoss);
   const target = Number(raw.target);
   if (raw.action !== 'WAIT' && (!Number.isFinite(stopLoss) || !Number.isFinite(target) || stopLoss <= 0 || target <= 0)) {
-    throw new Error('Claude response has invalid stopLoss/target for a BUY/SELL');
+    throw new Error(`${providerLabel} response has invalid stopLoss/target for a BUY/SELL`);
   }
   return {
     action: raw.action,
@@ -36,7 +41,7 @@ function sanitizeDecision(raw) {
 }
 
 async function callClaude(symbol, ctx) {
-  const response = await client.messages.create({
+  const response = await anthropicClient.messages.create({
     model: env.AI_MODEL,
     max_tokens: 1024,
     thinking: { type: 'adaptive' },
@@ -54,7 +59,55 @@ async function callClaude(symbol, ctx) {
 
   const textBlock = response.content.find((b) => b.type === 'text');
   if (!textBlock) throw new Error('Claude response had no text block');
-  return sanitizeDecision(JSON.parse(textBlock.text));
+  return sanitizeDecision(JSON.parse(textBlock.text), 'Claude');
+}
+
+async function callOpenAI(symbol, ctx) {
+  const response = await openaiClient.chat.completions.create({
+    model: env.OPENAI_MODEL,
+    messages: [
+      { role: 'system', content: buildSystemPrompt() },
+      { role: 'user', content: buildUserContent(symbol, ctx) },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'trade_decision', schema: DECISION_SCHEMA, strict: true },
+    },
+  });
+
+  const choice = response.choices?.[0];
+  if (choice?.finish_reason === 'content_filter') {
+    throw new Error('OpenAI declined to answer (content filter)');
+  }
+  const text = choice?.message?.content;
+  if (!text) throw new Error('OpenAI response had no content');
+  return sanitizeDecision(JSON.parse(text), 'OpenAI');
+}
+
+const PROVIDERS = {
+  claude: { label: 'Claude', client: () => anthropicClient, call: callClaude, enabledFlag: () => Boolean(env.ANTHROPIC_API_KEY) },
+  openai: { label: 'OpenAI', client: () => openaiClient, call: callOpenAI, enabledFlag: () => Boolean(env.OPENAI_API_KEY) },
+};
+
+/**
+ * Reusable provider dispatch — the same Claude/OpenAI call `decide()` uses
+ * internally, exposed so other callers (e.g. autoTradingService's ensemble
+ * confirmation, aiScanJob's background sweep) can get a single LLM opinion
+ * without going through decide()'s own quant-call + AIDecisionLog write.
+ * @param {string} providerKey 'claude'|'openai'
+ * @param {string} symbol
+ * @param {import('../../types.js').IndicatorSnapshot} ctx
+ * @returns {Promise<import('../../types.js').AiDecision & {providerLabel: string}>}
+ */
+export async function callProvider(providerKey, symbol, ctx) {
+  const provider = PROVIDERS[providerKey] ?? PROVIDERS.openai;
+  if (!env.AI_LLM_ENABLED || !provider.enabledFlag()) {
+    const e = new Error(`${provider.label} is not enabled/configured.`);
+    e.code = 'PROVIDER_UNAVAILABLE';
+    throw e;
+  }
+  const result = await provider.call(symbol, ctx);
+  return { ...result, providerLabel: provider.label };
 }
 
 /**
@@ -66,19 +119,23 @@ export async function decide(userId, symbol) {
   const ctx = await buildContext(symbol);
   const quant = scoreQuant(symbol, ctx);
 
-  let claude = null;
-  if (client && env.AI_LLM_ENABLED) {
+  const settings = await UserSettings.findOne({ userId }).lean();
+  const providerKey = settings?.aiProvider ?? 'openai';
+  const provider = PROVIDERS[providerKey] ?? PROVIDERS.openai;
+
+  let llm = null;
+  if (env.AI_LLM_ENABLED && provider.enabledFlag()) {
     try {
-      claude = await callClaude(symbol, ctx);
+      llm = await provider.call(symbol, ctx);
     } catch (err) {
-      console.error(`[decisionEngine] Claude call failed for ${symbol}, falling back to Quant:`, err.message);
+      console.error(`[decisionEngine] ${provider.label} call failed for ${symbol}, falling back to Quant:`, err.message);
     }
   }
 
-  const primary = claude ?? quant;
+  const primary = llm ?? quant;
   const models = [
     { name: 'Quant', action: quant.action, confidence: quant.confidence },
-    ...(claude ? [{ name: 'Claude', action: claude.action, confidence: claude.confidence }] : []),
+    ...(llm ? [{ name: provider.label, action: llm.action, confidence: llm.confidence }] : []),
   ];
 
   const log = await AIDecisionLog.create({

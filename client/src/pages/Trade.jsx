@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStocksStore } from '../store/useStocksStore.js';
 import { usePortfolioStore } from '../store/usePortfolioStore.js';
 import { useAIStore } from '../store/useAIStore.js';
+import { useAISignalsStore } from '../store/useAISignalsStore.js';
 import { stocksService } from '../services/stocks.service.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { StockSelector } from '../components/trading/StockSelector.jsx';
@@ -17,6 +18,8 @@ export function Trade() {
   const fetchPortfolio = usePortfolioStore((s) => s.fetch);
   const askAI = useAIStore((s) => s.askAI);
   const deciding = useAIStore((s) => s.deciding);
+  const signals = useAISignalsStore((s) => s.signals);
+  const fetchSignals = useAISignalsStore((s) => s.fetch);
 
   const [symbol, setSymbol] = useState('RELIANCE');
   const [candles, setCandles] = useState([]);
@@ -24,6 +27,7 @@ export function Trade() {
 
   usePolling(fetchWatchlist, 10000);
   usePolling(fetchPortfolio, 5000);
+  usePolling(fetchSignals, 30000);
 
   useEffect(() => {
     stocksService.candles(symbol, '5m', 100).then(setCandles);
@@ -46,7 +50,7 @@ export function Trade() {
         <p className="text-sm text-muted">Analyze, ask Claude for a read, and place a paper order.</p>
       </div>
 
-      <StockSelector stocks={watchlist} selected={symbol} onSelect={setSymbol} />
+      <StockSelector stocks={watchlist} selected={symbol} onSelect={setSymbol} signals={signals} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -58,7 +62,7 @@ export function Trade() {
         </div>
       </div>
 
-      <PositionsTable positions={portfolio?.positions} />
+      <PositionsTable positions={portfolio?.positions} signals={signals} />
     </div>
   );
 }

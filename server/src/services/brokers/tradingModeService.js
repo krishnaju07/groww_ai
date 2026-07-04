@@ -10,14 +10,26 @@
  */
 import { env } from '../../config/env.js';
 import { hasValidCredential } from './credentialStore.js';
+import { hasGrowwCredentials } from './growwAuth.js';
 import { isTripped } from '../risk/killSwitch.js';
+
+/**
+ * Groww's credential lives in server .env (GROWW_API_KEY/SECRET), checked via
+ * hasGrowwCredentials() — NOT the BrokerCredential DB collection that Angel One
+ * and Zerodha use. This is the single place that dispatches correctly per broker.
+ * @param {string} userId @param {string} brokerName @returns {Promise<boolean>}
+ */
+async function hasBrokerCredential(userId, brokerName) {
+  if (brokerName === 'groww') return hasGrowwCredentials();
+  return hasValidCredential(userId, brokerName);
+}
 
 /** @param {string} userId @param {string} brokerName @returns {Promise<boolean>} */
 export async function isLiveConfigured(userId, brokerName) {
   if (brokerName === 'paper') return false;
   if (!env.ENABLE_LIVE_TRADING) return false;
   if (await isTripped(userId)) return false;
-  return hasValidCredential(userId, brokerName);
+  return hasBrokerCredential(userId, brokerName);
 }
 
 /** @param {string} userId @param {string} brokerName @throws {Error & {code:string, status:number}} */
@@ -40,7 +52,7 @@ export async function assertLiveAllowed(userId, brokerName) {
     e.status = 400;
     throw e;
   }
-  if (!(await hasValidCredential(userId, brokerName))) {
+  if (!(await hasBrokerCredential(userId, brokerName))) {
     const e = new Error(`No valid ${brokerName} credentials configured.`);
     e.code = 'NO_BROKER_CREDENTIALS';
     e.status = 403;
@@ -65,7 +77,7 @@ export async function effectiveMode(userId, settings) {
  * @returns {Promise<import('../../types.js').TradingModeStatus>}
  */
 export async function getTradingModeStatus(userId, settings) {
-  const hasCredential = settings.activeBroker !== 'paper' && (await hasValidCredential(userId, settings.activeBroker));
+  const hasCredential = settings.activeBroker !== 'paper' && (await hasBrokerCredential(userId, settings.activeBroker));
   const liveEnabledEnv = env.ENABLE_LIVE_TRADING === true;
   const killSwitchEngaged = await isTripped(userId);
   return {

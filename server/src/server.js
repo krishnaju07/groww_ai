@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { apiRoutes } from './routes/index.js';
 import { startAutoTradingJob } from './jobs/autoTradingJob.js';
 import { startBrokerHealthJob } from './jobs/brokerHealthJob.js';
+import { startAiScanJob } from './jobs/aiScanJob.js';
 
 async function main() {
   await connectDb();
@@ -26,6 +27,7 @@ async function main() {
 
   startAutoTradingJob();
   startBrokerHealthJob();
+  startAiScanJob();
 }
 
 main().catch((err) => {

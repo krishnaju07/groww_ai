@@ -58,6 +58,73 @@ export function Settings() {
       </Card>
 
       <Card>
+        <div className="mb-4 font-display font-semibold">AI Provider</div>
+        <p className="mb-3 text-xs text-muted">
+          Which LLM the AI decision engine calls for BUY/SELL/WAIT calls. Switches immediately, no restart needed. If the
+          selected provider has no API key configured on the server, decisions silently fall back to the quant-only scorer.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: 'openai', label: 'OpenAI (GPT)' },
+            { key: 'claude', label: 'Claude' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={async () => {
+                try {
+                  await update({ aiProvider: key });
+                  toast.success(`AI provider set to ${label}`);
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}
+              className={`rounded-xl border py-2.5 font-semibold transition-colors ${
+                form.aiProvider === key ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border/70 text-muted hover:border-border'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <div className="mb-4 font-display font-semibold">Auto-Trading AI Confirmation</div>
+        <p className="mb-3 text-xs text-muted">
+          When on, the 30s auto-trading screen still runs the quant scorer on every symbol, but a BUY/SELL only actually
+          fires if the AI provider above also agrees on direction — an extra confirmation layer on top of the risk
+          manager and kill switch, which apply either way. Background AI scan (all symbols, informational, powers AI Top
+          Picks / watchlist badges / Portfolio AI View) runs every {form.aiScanIntervalMinutes ?? 5} minutes regardless of
+          this setting.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { key: true, label: 'On (Recommended)' },
+            { key: false, label: 'Off — quant only' },
+          ].map(({ key, label }) => (
+            <button
+              key={String(key)}
+              onClick={async () => {
+                try {
+                  await update({ autoInvest: { requireAiConfirmation: key } });
+                  toast.success(`AI confirmation for auto-trading turned ${key ? 'on' : 'off'}`);
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}
+              className={`rounded-xl border py-2.5 font-semibold transition-colors ${
+                form.autoInvest?.requireAiConfirmation === key
+                  ? 'border-accent/50 bg-accent/10 text-accent'
+                  : 'border-border/70 text-muted hover:border-border'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
         <div className="mb-4 font-display font-semibold">Investment Limits</div>
         <div className="grid grid-cols-2 gap-4">
           <div>

@@ -2,11 +2,22 @@
  * Real-money broker backed by the Groww Trade API order endpoints. Used ONLY
  * when live trading is fully configured + enabled (see tradingModeService.js).
  * Auth: access token resolved per request by growwAuth.getAccessToken().
- * Endpoints per https://groww.in/trade-api/docs (Orders). Response envelope:
- * { status: 'SUCCESS'|'FAILURE', payload?, error?: {code, message} }.
+ * Endpoints verified against https://groww.in/trade-api/docs/curl (Orders,
+ * Portfolio, Margin, Live Data sub-pages). Response envelope for all of these
+ * (distinct from the token endpoint): { status: 'SUCCESS'|'FAILURE', payload?, error?: {code, message} }.
  */
 import { GROWW_BASE_URL, GROWW_API_VERSION, GROWW_ORDER } from '../../config/constants.js';
 import { getAccessToken } from './growwAuth.js';
+
+/** @param {string} symbol e.g. 'RELIANCE' @returns {string} Groww order trading_symbol, e.g. 'RELIANCE-EQ' (order endpoints only — quote/LTP endpoints use the bare symbol). */
+function toGrowwTradingSymbol(symbol) {
+  return `${symbol}-EQ`;
+}
+
+/** @param {string} tradingSymbol @returns {string} bare symbol, stripping a trailing '-EQ' if present */
+function fromGrowwTradingSymbol(tradingSymbol) {
+  return String(tradingSymbol ?? '').replace(/-EQ$/, '');
+}
 
 async function request(path, opts = {}) {
   const { method = 'GET', body, query } = opts;
@@ -61,7 +72,7 @@ export function createGrowwBroker() {
       const payload = await request('/order/create', {
         method: 'POST',
         body: {
-          trading_symbol: o.symbol,
+          trading_symbol: toGrowwTradingSymbol(o.symbol),
           exchange: GROWW_ORDER.EXCHANGE_NSE,
           segment: GROWW_ORDER.SEGMENT_CASH,
           quantity: o.quantity,
@@ -99,8 +110,8 @@ export function createGrowwBroker() {
     },
 
     async getOrderStatus(orderId) {
-      const payload = await request('/order/detail', {
-        query: { groww_order_id: orderId, segment: GROWW_ORDER.SEGMENT_CASH },
+      const payload = await request(`/order/detail/${orderId}`, {
+        query: { segment: GROWW_ORDER.SEGMENT_CASH },
       });
       return {
         brokerOrderId: orderId,
@@ -113,49 +124,60 @@ export function createGrowwBroker() {
     async getOrderList() {
       const payload = await request('/order/list', { query: { segment: GROWW_ORDER.SEGMENT_CASH } });
       const orders = payload?.order_list ?? [];
-      return orders.map((o) => ({ brokerOrderId: o.groww_order_id, status: mapStatus(o.order_status) }));
+      return orders.map((o) => ({
+        brokerOrderId: o.groww_order_id,
+        status: mapStatus(o.order_status),
+        symbol: fromGrowwTradingSymbol(o.trading_symbol),
+        action: o.transaction_type,
+        quantity: o.quantity,
+        filledPrice: o.average_fill_price || o.price,
+        filledQuantity: o.filled_quantity,
+        createdAt: o.created_at ? new Date(o.created_at) : null,
+      }));
     },
 
     async getLTP(symbol) {
-      const payload = await request('/live_data/quote', {
+      const payload = await request('/live-data/quote', {
         query: { exchange: GROWW_ORDER.EXCHANGE_NSE, segment: GROWW_ORDER.SEGMENT_CASH, trading_symbol: symbol },
       });
-      return payload?.last_price ?? payload?.ltp;
+      return payload?.last_price;
     },
 
+    /** @param {string[]} symbols @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
     async getLTPBatch(symbols) {
-      const entries = await Promise.all(
-        symbols.map(async (s) => {
-          try {
-            return [s, await this.getLTP(s)];
-          } catch {
-            return [s, null];
-          }
-        }),
-      );
-      return Object.fromEntries(entries.filter(([, v]) => v != null));
+      if (!symbols.length) return {};
+      const exchangeSymbols = symbols.map((s) => `NSE_${s}`).join(',');
+      const payload = await request('/live-data/ltp', {
+        query: { segment: GROWW_ORDER.SEGMENT_CASH, exchange_symbols: exchangeSymbols },
+      });
+      const out = {};
+      for (const s of symbols) {
+        const price = payload?.[`NSE_${s}`];
+        if (typeof price === 'number') out[s] = price;
+      }
+      return out;
     },
 
     async getHoldings() {
       const payload = await request('/holdings/user');
       const holdings = payload?.holdings ?? [];
-      return holdings.map((h) => ({ symbol: h.trading_symbol, quantity: h.quantity, avgPrice: h.average_price, ltp: 0 }));
+      return holdings.map((h) => ({ symbol: fromGrowwTradingSymbol(h.trading_symbol), quantity: h.quantity, avgPrice: h.average_price, ltp: 0 }));
     },
 
     async getPositions() {
       const payload = await request('/positions/user', { query: { segment: GROWW_ORDER.SEGMENT_CASH } });
       const positions = payload?.positions ?? [];
       return positions.map((p) => ({
-        symbol: p.trading_symbol,
+        symbol: fromGrowwTradingSymbol(p.trading_symbol),
         quantity: p.quantity,
-        avgPrice: p.buy_avg_price ?? p.average_price,
+        avgPrice: p.net_price,
         ltp: 0,
       }));
     },
 
     async getMargin() {
       const payload = await request('/margins/detail/user');
-      return { available: payload?.equity?.available_margin ?? 0, used: payload?.equity?.used_margin ?? 0 };
+      return { available: payload?.clear_cash ?? 0, used: payload?.net_margin_used ?? 0 };
     },
 
     async cancelAllOrders() {

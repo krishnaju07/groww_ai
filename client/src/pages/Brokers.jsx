@@ -38,8 +38,9 @@ export function Brokers() {
           name="groww"
           label="Groww"
           connected={status?.groww?.connected}
-          description="Reuses GROWW_API_KEY/SECRET from server .env — no per-user credential form needed."
+          description="Reuses GROWW_API_KEY/SECRET from server .env. Requires daily approval on Groww's API Keys page before a token can be generated."
           onReconnectRedirect={async () => {
+            window.open('https://groww.in/trade-api/api-keys', '_blank', 'noopener');
             await brokersService.testGroww();
             await fetchStatus();
           }}

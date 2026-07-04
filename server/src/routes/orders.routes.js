@@ -5,7 +5,9 @@ import { validate } from '../middleware/validate.js';
 import { requireLiveConfirm } from '../middleware/requireLiveConfirm.js';
 import { placeOrder } from '../services/orderService.js';
 import { Order } from '../models/Order.js';
+import { UserSettings } from '../models/UserSettings.js';
 import { brokerFor } from '../services/brokers/registry.js';
+import { effectiveMode } from '../services/brokers/tradingModeService.js';
 
 export const ordersRoutes = Router();
 
@@ -24,8 +26,50 @@ const PlaceOrderSchema = z.object({
 ordersRoutes.get(
   '/',
   asyncHandler(async (req, res) => {
-    const orders = await Order.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
-    res.json({ success: true, data: orders });
+    const localOrders = await Order.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
+
+    const settings = await UserSettings.findOne({ userId: req.userId }).lean();
+    const mode = await effectiveMode(req.userId, settings);
+
+    if (mode !== 'live') {
+      return res.json({ success: true, data: localOrders });
+    }
+
+    // Live mode: the broker's own order list is the source of truth (it also
+    // reflects orders placed outside this app, e.g. directly on Groww/Zerodha/
+    // Angel One) — merge in local metadata (source, confirmRealMoney, reject
+    // reason) by brokerOrderId where we have it, else show broker-only fields.
+    const broker = brokerFor(settings.activeBroker, req.userId);
+    const localByBrokerId = new Map(localOrders.filter((o) => o.brokerOrderId).map((o) => [o.brokerOrderId, o]));
+
+    let brokerOrders = [];
+    try {
+      brokerOrders = await broker.getOrderList();
+    } catch (err) {
+      console.error(`[orders] live getOrderList failed for ${settings.activeBroker}:`, err.message);
+      return res.json({ success: true, data: localOrders, warning: `Could not reach ${settings.activeBroker}: ${err.message}` });
+    }
+
+    const merged = brokerOrders.map((bo) => {
+      const local = localByBrokerId.get(bo.brokerOrderId);
+      return {
+        _id: local?._id ?? bo.brokerOrderId,
+        broker: settings.activeBroker,
+        mode: 'live',
+        brokerOrderId: bo.brokerOrderId,
+        symbol: bo.symbol ?? local?.symbol,
+        action: bo.action ?? local?.action,
+        quantity: bo.quantity ?? local?.quantity,
+        orderType: local?.orderType ?? 'MARKET',
+        status: bo.status,
+        source: local?.source ?? 'external',
+        confirmedRealMoney: local?.confirmedRealMoney ?? true,
+        rejectReason: local?.rejectReason ?? '',
+        createdAt: bo.createdAt ?? local?.createdAt ?? null,
+      };
+    });
+
+    res.json({ success: true, data: merged });
   }),
 );
 

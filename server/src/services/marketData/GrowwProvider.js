@@ -1,6 +1,9 @@
 /**
  * Market-data-only Groww client (quotes/candles) — separate from GrowwBroker
  * (order execution) even though both share `growwAuth.getAccessToken()`.
+ * Endpoints verified against https://groww.in/trade-api/docs/curl (Live Data,
+ * Historical Data sub-pages) — note quote/LTP use the bare trading symbol
+ * (no '-EQ' suffix), unlike order placement.
  */
 import { GROWW_BASE_URL, GROWW_API_VERSION } from '../../config/constants.js';
 import { getAccessToken } from '../brokers/growwAuth.js';
@@ -29,28 +32,27 @@ export const GrowwProvider = {
 
   /** @param {string} symbol @returns {Promise<number>} */
   async getLTP(symbol) {
-    const payload = await request('/live_data/quote', {
+    const payload = await request('/live-data/quote', {
       exchange: 'NSE',
       segment: 'CASH',
       trading_symbol: symbol,
     });
-    const price = payload?.last_price ?? payload?.ltp;
+    const price = payload?.last_price;
     if (typeof price !== 'number') throw new Error(`Groww LTP ${symbol} → missing last_price`);
     return price;
   },
 
-  /** @param {string[]} symbols @returns {Promise<Record<string, number>>} */
+  /** @param {string[]} symbols @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
   async getLTPBatch(symbols) {
-    const entries = await Promise.all(
-      symbols.map(async (s) => {
-        try {
-          return [s, await this.getLTP(s)];
-        } catch {
-          return [s, null];
-        }
-      }),
-    );
-    return Object.fromEntries(entries.filter(([, v]) => v != null));
+    if (!symbols.length) return {};
+    const exchangeSymbols = symbols.map((s) => `NSE_${s}`).join(',');
+    const payload = await request('/live-data/ltp', { segment: 'CASH', exchange_symbols: exchangeSymbols });
+    const out = {};
+    for (const s of symbols) {
+      const price = payload?.[`NSE_${s}`];
+      if (typeof price === 'number') out[s] = price;
+    }
+    return out;
   },
 
   /**
@@ -61,9 +63,9 @@ export const GrowwProvider = {
    */
   async getCandles(symbol, interval = '5m', limit = 100) {
     const minutes = INTERVAL_MINUTES[interval] ?? 5;
-    const endTime = Date.now();
-    const startTime = endTime - minutes * 60_000 * limit;
-    const payload = await request('/historical/candle', {
+    const endTime = Math.floor(Date.now() / 1000);
+    const startTime = endTime - minutes * 60 * limit;
+    const payload = await request('/historical/candle/range', {
       exchange: 'NSE',
       segment: 'CASH',
       trading_symbol: symbol,

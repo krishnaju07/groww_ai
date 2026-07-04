@@ -40,6 +40,11 @@ const Schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(''),
   AI_MODEL: z.string().default('claude-opus-4-8'),
   AI_LLM_ENABLED: boolStr(true),
+
+  OPENAI_API_KEY: z.string().optional().default(''),
+  OPENAI_MODEL: z.string().default('gpt-4o'),
+
+  AI_SCAN_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
 });
 
 const parsed = Schema.safeParse(process.env);

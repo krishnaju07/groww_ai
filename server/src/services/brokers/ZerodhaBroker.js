@@ -89,8 +89,12 @@ export function createZerodhaBroker(userId) {
       return orders.map((o) => ({
         brokerOrderId: o.order_id,
         status: mapStatus(o.status),
+        symbol: o.tradingsymbol,
+        action: o.transaction_type,
+        quantity: o.quantity,
         filledPrice: o.average_price || undefined,
         filledQuantity: o.filled_quantity || undefined,
+        createdAt: o.order_timestamp ? new Date(o.order_timestamp) : null,
       }));
     },
 
