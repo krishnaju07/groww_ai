@@ -1,13 +1,5 @@
-import { apiGet } from '../lib/api.js';
+import { api } from '../lib/api.js';
 
-/**
- * @typedef {import('../types.js').PortfolioResponse} PortfolioResponse
- */
-
-/**
- * Fetch the current portfolio summary + open positions.
- * @returns {Promise<PortfolioResponse>}
- */
-export function getPortfolio() {
-  return apiGet('/portfolio');
-}
+export const portfolioService = {
+  get: () => api.get('/portfolio').then((r) => r.data),
+};

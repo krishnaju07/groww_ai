@@ -1,77 +1,25 @@
-import { ChevronDown } from 'lucide-react';
-import { formatINR, formatPercent, pnlColorClass } from '../../lib/format';
-import { GLASS_PANEL, LABEL, NUM, cx } from '../../lib/ui';
+import { formatINR, formatPercent } from '../../lib/format.js';
 
 /**
- * @typedef {import('../../types').StockQuote} StockQuote
+ * @param {{stocks:object[], selected:string, onSelect:(symbol:string)=>void}} props
  */
-
-/**
- * StockSelector — dropdown to pick a symbol from the live universe.
- * Shows the symbol + name, and (when available) the live price / day change of
- * the currently selected stock beside the control.
- *
- * @param {Object} props
- * @param {StockQuote[]} props.stocks            Live universe quotes.
- * @param {string} props.value                   Currently selected canonical symbol.
- * @param {(symbol:string)=>void} props.onChange Called with the chosen symbol.
- * @returns {JSX.Element}
- */
-export default function StockSelector({ stocks, value, onChange }) {
-  const rows = Array.isArray(stocks) ? stocks : [];
-  const selected = rows.find((s) => s.symbol === value) || null;
-  const up = selected ? selected.change >= 0 : true;
-
+export function StockSelector({ stocks = [], selected, onSelect }) {
   return (
-    <div className="w-full">
-      <label className={cx(LABEL, 'mb-2 block')}>Stock</label>
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
-          <select
-            value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
-            className={cx(
-              GLASS_PANEL,
-              'w-full appearance-none px-3.5 py-2.5 pr-10 text-sm font-medium text-text outline-none transition-all',
-              'focus:border-accent/40 focus:ring-2 focus:ring-accent/40',
-              '[&>option]:bg-surface [&>option]:text-text',
-            )}
-          >
-            {rows.length === 0 && <option value="">No stocks available</option>}
-            {rows.map((s) => (
-              <option key={s.symbol} value={s.symbol}>
-                {s.symbol} — {s.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={16}
-            className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-muted"
-          />
-        </div>
-
-        {selected && (
-          <div
-            className={cx(
-              GLASS_PANEL,
-              'shrink-0 px-3.5 py-2 text-right',
-            )}
-          >
-            <div className={cx(NUM, 'text-sm font-bold text-text')}>
-              {formatINR(selected.price)}
-            </div>
-            <div
-              className={cx(
-                NUM,
-                'text-xs font-semibold',
-                pnlColorClass(selected.change),
-              )}
-            >
-              {up ? '▲' : '▼'} {formatPercent(selected.changePercent)}
-            </div>
-          </div>
-        )}
-      </div>
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {stocks.map((s) => (
+        <button
+          key={s.symbol}
+          onClick={() => onSelect(s.symbol)}
+          className={`shrink-0 rounded-xl border px-4 py-2.5 text-left transition-colors ${
+            selected === s.symbol
+              ? 'border-accent/50 bg-accent/10 text-accent'
+              : 'border-border/70 bg-surface/50 text-text hover:border-accent/30'
+          }`}
+        >
+          <div className="text-sm font-semibold">{s.symbol}</div>
+          <div className="text-xs text-muted">{s.ltp != null ? formatINR(s.ltp) : '—'}</div>
+        </button>
+      ))}
     </div>
   );
 }

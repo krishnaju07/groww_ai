@@ -1,25 +1,19 @@
-/**
- * Indian equity market hours check (NSE/BSE regular session).
- * Open Monday–Friday, 09:15–15:30 IST. IST = UTC + 5:30, with no DST,
- * so we derive IST wall-clock time directly from the UTC timestamp — no deps,
- * independent of the host machine's local timezone.
- *
- * @param {Date} [now=new Date()] reference instant (defaults to current time)
- * @returns {boolean} true when the market is currently open
- */
-export function isMarketOpen(now = new Date()) {
-  const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // +5:30
-  const ist = new Date(now.getTime() + IST_OFFSET_MS);
+import { env } from '../config/env.js';
 
-  // Use UTC getters on the shifted date so we read IST wall-clock values.
-  const day = ist.getUTCDay(); // 0 = Sunday, 6 = Saturday
-  if (day === 0 || day === 6) return false;
+const IST_OFFSET_MIN = 5 * 60 + 30;
 
-  const minutesOfDay = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  const open = 9 * 60 + 15; // 09:15 -> 555
-  const close = 15 * 60 + 30; // 15:30 -> 930
-
-  return minutesOfDay >= open && minutesOfDay <= close;
+/** @returns {Date} current time shifted to IST wall-clock (still a Date, just offset for field reads). */
+function nowIst() {
+  const now = new Date();
+  return new Date(now.getTime() + IST_OFFSET_MIN * 60 * 1000 + now.getTimezoneOffset() * 60 * 1000);
 }
 
-export default isMarketOpen;
+/** @returns {boolean} true if NSE cash market is open (Mon-Fri 09:15-15:30 IST), unless IGNORE_MARKET_HOURS=true. */
+export function isMarketOpen() {
+  if (env.IGNORE_MARKET_HOURS) return true;
+  const ist = nowIst();
+  const day = ist.getUTCDay();
+  if (day === 0 || day === 6) return false;
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 30;
+}

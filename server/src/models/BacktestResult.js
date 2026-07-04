@@ -1,28 +1,41 @@
 import mongoose from 'mongoose';
 
-const { Schema, model } = mongoose;
-
-/**
- * Persisted output of a backtest run (mirrors the BacktestResult DTO).
- * The DTO `id` is stored here as `resultId`; nested params/equityCurve/trades
- * are stored as Mixed since their shapes are owned by the backtest service.
- */
-const backtestResultSchema = new Schema(
+const BacktestResultSchema = new mongoose.Schema(
   {
-    resultId: { type: String, required: true, unique: true },
-    params: { type: Schema.Types.Mixed, required: true },
-    totalReturnPercent: { type: Number, required: true },
-    finalCapital: { type: Number, required: true },
-    maxDrawdownPercent: { type: Number, required: true },
-    winRate: { type: Number, required: true },
-    totalTrades: { type: Number, required: true },
-    sharpeRatio: { type: Number, required: true },
-    equityCurve: { type: [Schema.Types.Mixed], default: [] },
-    trades: { type: [Schema.Types.Mixed], default: [] },
+    userId: { type: String, required: true },
+    symbol: { type: String, required: true },
+    from: { type: Date, required: true },
+    to: { type: Date, required: true },
+    startingCapital: { type: Number, required: true },
+    endingCapital: { type: Number, required: true },
+    totalTrades: { type: Number, default: 0 },
+    winCount: { type: Number, default: 0 },
+    lossCount: { type: Number, default: 0 },
+    winRate: { type: Number, default: 0 },
+    totalPnl: { type: Number, default: 0 },
+    totalPnlPercent: { type: Number, default: 0 },
+    maxDrawdownPercent: { type: Number, default: 0 },
+    equityCurve: [
+      {
+        time: { type: Date, required: true },
+        equity: { type: Number, required: true },
+      },
+    ],
+    trades: [
+      {
+        symbol: String,
+        action: String,
+        quantity: Number,
+        price: Number,
+        pnl: Number,
+        time: Date,
+      },
+    ],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-const BacktestResult = model('BacktestResult', backtestResultSchema);
+BacktestResultSchema.index({ userId: 1, createdAt: -1 });
 
-export default BacktestResult;
+export const BacktestResult =
+  mongoose.models.BacktestResult || mongoose.model('BacktestResult', BacktestResultSchema);

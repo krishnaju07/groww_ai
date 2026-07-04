@@ -1,13 +1,7 @@
-import { apiGet } from '../lib/api.js';
+import { api } from '../lib/api.js';
 
-/**
- * @typedef {import('../types.js').DashboardData} DashboardData
- */
-
-/**
- * Fetch the aggregated dashboard payload.
- * @returns {Promise<DashboardData>}
- */
-export function getDashboard() {
-  return apiGet('/dashboard');
-}
+export const dashboardService = {
+  summary: () => api.get('/dashboard/summary').then((r) => r.data),
+  watchlist: () => api.get('/dashboard/watchlist').then((r) => r.data),
+  equityCurve: () => api.get('/dashboard/equity-curve').then((r) => r.data),
+};

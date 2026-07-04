@@ -1,76 +1,33 @@
-/**
- * Formatting helpers shared across the GrowwAI client.
- * Indian-locale money/number formatting + signed percent + P&L color classes.
- */
+const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+const inrWhole = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
-const inrFormatter = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 2,
-});
-
-const numberFormatter = new Intl.NumberFormat('en-IN', {
-  maximumFractionDigits: 2,
-});
-
-/**
- * Format a number as Indian Rupee currency, e.g. ₹12,34,567.89.
- * @param {number} n
- * @returns {string}
- */
+/** @param {number} n @returns {string} */
 export function formatINR(n) {
-  const value = Number.isFinite(n) ? n : 0;
-  return inrFormatter.format(value);
+  if (n == null || Number.isNaN(n)) return '—';
+  return inr.format(n);
 }
 
-/**
- * Format a number as a signed percentage with 2 decimals, e.g. "+5.20%" / "-1.75%".
- * @param {number} n
- * @returns {string}
- */
-export function formatPercent(n) {
-  const value = Number.isFinite(n) ? n : 0;
-  const sign = value > 0 ? '+' : '';
-  return `${sign}${value.toFixed(2)}%`;
+/** @param {number} n @returns {string} */
+export function formatINRWhole(n) {
+  if (n == null || Number.isNaN(n)) return '—';
+  return inrWhole.format(n);
 }
 
-/**
- * Format a plain number with Indian grouping and up to 2 decimals.
- * @param {number} n
- * @returns {string}
- */
-export function formatNumber(n) {
-  const value = Number.isFinite(n) ? n : 0;
-  return numberFormatter.format(value);
+/** @param {number} n @param {number} [digits] @returns {string} */
+export function formatPercent(n, digits = 2) {
+  if (n == null || Number.isNaN(n)) return '—';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(digits)}%`;
 }
 
-/**
- * Format an ISO timestamp as a human-readable local date-time.
- * @param {string} iso
- * @returns {string}
- */
-export function formatDateTime(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+/** @param {string|Date} d @returns {string} */
+export function formatTime(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
 
-/**
- * Tailwind text-color class for a P&L value:
- * positive → accent green, negative → danger red, zero/NaN → muted gray.
- * @param {number} n
- * @returns {'text-accent'|'text-danger'|'text-gray-400'}
- */
-export function pnlColorClass(n) {
-  const value = Number.isFinite(n) ? n : 0;
-  if (value > 0) return 'text-accent';
-  if (value < 0) return 'text-danger';
-  return 'text-gray-400';
+/** @param {string|Date} d @returns {string} */
+export function formatDateTime(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }

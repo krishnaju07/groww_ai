@@ -1,36 +1,30 @@
 import mongoose from 'mongoose';
+import { ACTIONS, BROKERS, TRADE_SOURCES } from '../config/constants.js';
 
-const { Schema, model } = mongoose;
-
-/**
- * A single executed paper trade (mirrors the Trade DTO minus `id`).
- * BUY trades open as OPEN; the matching BUY is marked CLOSED with pnl when sold.
- * SELL trades are created CLOSED with realized pnl.
- */
-const tradeSchema = new Schema(
+/** One row per filled economic event — a BUY that opened a position, or a SELL that closed one. */
+const TradeSchema = new mongoose.Schema(
   {
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    symbol: { type: String, required: true, trim: true, uppercase: true },
-    action: { type: String, required: true, enum: ['BUY', 'SELL'] },
+    userId: { type: String, required: true },
+    broker: { type: String, enum: BROKERS, required: true },
+    mode: { type: String, enum: ['paper', 'live'], required: true },
+    symbol: { type: String, required: true },
+    action: { type: String, enum: ACTIONS, required: true },
     quantity: { type: Number, required: true },
     price: { type: Number, required: true },
     investmentAmount: { type: Number, required: true },
-    tradeType: { type: String, required: true, enum: ['manual', 'automatic'] },
-    triggerReason: { type: String },
-    status: { type: String, required: true, enum: ['OPEN', 'CLOSED'], default: 'OPEN' },
-    mode: { type: String, enum: ['paper', 'live'], default: 'paper' },
-    brokerOrderId: { type: String },
-    pnl: { type: Number },
-    pnlPercent: { type: Number },
-    openedAt: { type: Date, required: true, default: Date.now },
-    closedAt: { type: Date },
+    tradeSource: { type: String, enum: TRADE_SOURCES, default: 'manual' },
+    triggerReason: { type: String, default: '' },
+    status: { type: String, enum: ['OPEN', 'CLOSED'], required: true },
+    pnl: { type: Number, default: 0 },
+    pnlPercent: { type: Number, default: 0 },
+    aiDecisionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AIDecisionLog', default: null },
+    brokerOrderId: { type: String, default: null },
+    openedAt: { type: Date, default: Date.now },
+    closedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-tradeSchema.index({ userId: 1, status: 1 });
-tradeSchema.index({ userId: 1, createdAt: -1 });
+TradeSchema.index({ userId: 1, createdAt: -1 });
 
-const Trade = model('Trade', tradeSchema);
-
-export default Trade;
+export const Trade = mongoose.models.Trade || mongoose.model('Trade', TradeSchema);

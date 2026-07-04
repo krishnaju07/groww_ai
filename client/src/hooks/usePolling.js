@@ -1,41 +1,16 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 /**
- * Run `fn` once on mount (and whenever `deps` change), then repeatedly every
- * `intervalMs` milliseconds. The interval is cleared on unmount / dep change.
- *
- * The latest `fn` is always invoked via a ref so callers may pass an inline
- * closure without resetting the interval on every render.
- *
- * @param {() => (void | Promise<void>)} fn function to invoke each tick
- * @param {number} intervalMs polling interval in milliseconds
- * @param {ReadonlyArray<unknown>} [deps=[]] re-create the interval when these change
+ * Calls `fn` immediately, then every `intervalMs`. `fn` should be a stable
+ * store-bound async function (fetch methods dedupe in-flight calls themselves).
+ * @param {() => void|Promise<void>} fn
+ * @param {number} intervalMs
  */
-export function usePolling(fn, intervalMs, deps = []) {
-  const savedFn = useRef(fn);
-
+export function usePolling(fn, intervalMs) {
   useEffect(() => {
-    savedFn.current = fn;
-  }, [fn]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const tick = () => {
-      if (cancelled) return;
-      savedFn.current();
-    };
-
-    // Fire immediately, then on each interval.
-    tick();
-    const id = setInterval(tick, intervalMs);
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    fn();
+    const id = setInterval(fn, intervalMs);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, ...deps]);
+  }, [intervalMs]);
 }
-
-export default usePolling;

@@ -1,142 +1,79 @@
-import { MarketDataProvider, findUniverse } from './MarketDataProvider.js';
-import { env } from '../../config/env.js';
+/**
+ * Market-data-only Groww client (quotes/candles) — separate from GrowwBroker
+ * (order execution) even though both share `growwAuth.getAccessToken()`.
+ */
 import { GROWW_BASE_URL, GROWW_API_VERSION } from '../../config/constants.js';
+import { getAccessToken } from '../brokers/growwAuth.js';
 
-/**
- * @typedef {import('../../types.js').StockQuote} StockQuote
- * @typedef {import('../../types.js').Candle} Candle
- */
-
-/**
- * Format a Date as `yyyy-MM-dd HH:mm:ss` in UTC (Groww candle range bounds).
- *
- * @param {Date} d
- * @returns {string}
- */
-function formatGrowwTime(d) {
-  const iso = d.toISOString(); // 2026-06-21T12:34:56.789Z
-  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
-}
-
-/**
- * Format an epoch-seconds timestamp as a `YYYY-MM-DD` UTC date string.
- *
- * @param {number} epochSeconds
- * @returns {string}
- */
-function epochToDate(epochSeconds) {
-  return new Date(epochSeconds * 1000).toISOString().slice(0, 10);
-}
-
-/**
- * Market-data provider backed by the real Groww Trade API (₹499/mo).
- * Every request carries the bearer access token and API-version headers.
- * The service layer falls back to the mock provider whenever this throws
- * (e.g. missing token, expired subscription, deprecated endpoint).
- */
-export class GrowwProvider extends MarketDataProvider {
-  name = 'groww';
-
-  /**
-   * Common headers for every Groww request.
-   *
-   * @returns {Record<string,string>}
-   * @throws {Error} when `GROWW_ACCESS_TOKEN` is empty
-   */
-  headers() {
-    if (!env.GROWW_ACCESS_TOKEN) {
-      throw new Error('GROWW_ACCESS_TOKEN is not configured');
-    }
-    return {
-      Authorization: `Bearer ${env.GROWW_ACCESS_TOKEN}`,
-      'X-API-VERSION': GROWW_API_VERSION,
+async function request(path, query) {
+  const token = await getAccessToken();
+  const qs = query ? `?${new URLSearchParams(query)}` : '';
+  const res = await fetch(`${GROWW_BASE_URL}${path}${qs}`, {
+    headers: {
       Accept: 'application/json',
-    };
+      Authorization: `Bearer ${token}`,
+      'X-API-VERSION': GROWW_API_VERSION,
+    },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || (json?.status && json.status !== 'SUCCESS')) {
+    throw new Error(`Groww market-data ${path} failed: ${json?.error?.message || `HTTP ${res.status}`}`);
   }
-
-  /**
-   * @param {string} symbol canonical symbol
-   * @returns {Promise<StockQuote>}
-   */
-  async getQuote(symbol) {
-    const u = findUniverse(symbol);
-    const headers = this.headers();
-    const params = new URLSearchParams({
-      exchange: u.gexch,
-      segment: u.gseg,
-      trading_symbol: u.gtsym,
-    });
-    const url = `${GROWW_BASE_URL}/live-data/quote?${params.toString()}`;
-    const res = await fetch(url, { headers });
-    if (!res.ok) {
-      throw new Error(`Groww quote failed for ${symbol}: HTTP ${res.status}`);
-    }
-    const json = await res.json();
-    const payload = json?.payload;
-    if (!payload) {
-      throw new Error(`Groww quote: empty payload for ${symbol}`);
-    }
-    const ohlc = payload.ohlc || {};
-    const price = Number(payload.last_price ?? ohlc.close ?? 0);
-    const change = Number(payload.day_change ?? 0);
-    const changePercent = Number(payload.day_change_perc ?? 0);
-    const previousClose = price - change;
-    return {
-      symbol: u.symbol,
-      name: u.name,
-      price,
-      change,
-      changePercent,
-      open: Number(ohlc.open ?? price),
-      high: Number(ohlc.high ?? price),
-      low: Number(ohlc.low ?? price),
-      previousClose,
-      volume: Number(payload.volume ?? 0),
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  /**
-   * NOTE: Groww marks the historical candle/range endpoint as deprecated; on
-   * failure the MarketDataService falls back to the mock provider.
-   *
-   * @param {string} symbol canonical symbol
-   * @param {number} days
-   * @returns {Promise<Candle[]>}
-   */
-  async getHistory(symbol, days) {
-    const u = findUniverse(symbol);
-    const headers = this.headers();
-    const end = new Date();
-    const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
-    const params = new URLSearchParams({
-      exchange: u.gexch,
-      segment: u.gseg,
-      trading_symbol: u.gtsym,
-      interval_in_minutes: '1440',
-      start_time: formatGrowwTime(start),
-      end_time: formatGrowwTime(end),
-    });
-    const url = `${GROWW_BASE_URL}/historical/candle/range?${params.toString()}`;
-    const res = await fetch(url, { headers });
-    if (!res.ok) {
-      throw new Error(`Groww history failed for ${symbol}: HTTP ${res.status}`);
-    }
-    const json = await res.json();
-    const candles = json?.payload?.candles;
-    if (!Array.isArray(candles)) {
-      throw new Error(`Groww history: no candles for ${symbol}`);
-    }
-    // Each candle is [epochSeconds, open, high, low, close, volume].
-    return candles.map((c) => ({
-      date: epochToDate(Number(c[0])),
-      open: Number(c[1]),
-      high: Number(c[2]),
-      low: Number(c[3]),
-      close: Number(c[4]),
-      volume: Number(c[5] ?? 0),
-    }));
-  }
+  return json?.payload ?? json;
 }
 
-export default GrowwProvider;
+const INTERVAL_MINUTES = { '1m': 1, '5m': 5, '15m': 15, '1d': 1440 };
+
+export const GrowwProvider = {
+  name: 'groww',
+
+  /** @param {string} symbol @returns {Promise<number>} */
+  async getLTP(symbol) {
+    const payload = await request('/live_data/quote', {
+      exchange: 'NSE',
+      segment: 'CASH',
+      trading_symbol: symbol,
+    });
+    const price = payload?.last_price ?? payload?.ltp;
+    if (typeof price !== 'number') throw new Error(`Groww LTP ${symbol} → missing last_price`);
+    return price;
+  },
+
+  /** @param {string[]} symbols @returns {Promise<Record<string, number>>} */
+  async getLTPBatch(symbols) {
+    const entries = await Promise.all(
+      symbols.map(async (s) => {
+        try {
+          return [s, await this.getLTP(s)];
+        } catch {
+          return [s, null];
+        }
+      }),
+    );
+    return Object.fromEntries(entries.filter(([, v]) => v != null));
+  },
+
+  /**
+   * @param {string} symbol
+   * @param {'1m'|'5m'|'15m'|'1d'} interval
+   * @param {number} [limit]
+   * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
+   */
+  async getCandles(symbol, interval = '5m', limit = 100) {
+    const minutes = INTERVAL_MINUTES[interval] ?? 5;
+    const endTime = Date.now();
+    const startTime = endTime - minutes * 60_000 * limit;
+    const payload = await request('/historical/candle', {
+      exchange: 'NSE',
+      segment: 'CASH',
+      trading_symbol: symbol,
+      start_time: String(startTime),
+      end_time: String(endTime),
+      interval_in_minutes: String(minutes),
+    });
+    const rows = payload?.candles ?? [];
+    return rows
+      .map((c) => ({ time: new Date(c[0] * 1000), open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] }))
+      .slice(-limit);
+  },
+};

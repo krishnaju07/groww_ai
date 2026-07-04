@@ -1,54 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Smoothly counts from the previous value to `value` (easeOutCubic). Honors
- * `prefers-reduced-motion`. Render the figure via the `format` callback.
- * @param {Object} props
- * @param {number} props.value
- * @param {(n:number)=>string} [props.format]  formatter for the displayed value
- * @param {number} [props.duration]            ms (default 650)
- * @param {string} [props.className]
- * @returns {JSX.Element}
+ * Count-up animation toward `value`. `format` receives the interpolated number.
+ * @param {{value:number, format:(n:number)=>string, duration?:number, className?:string}} props
  */
-export default function AnimatedNumber({
-  value,
-  format = (n) => String(Math.round(n)),
-  duration = 650,
-  className = '',
-}) {
-  const [display, setDisplay] = useState(Number(value) || 0);
-  const fromRef = useRef(Number(value) || 0);
-  const rafRef = useRef(0);
+export function AnimatedNumber({ value, format = (n) => n.toFixed(0), duration = 500, className = '' }) {
+  const [display, setDisplay] = useState(value ?? 0);
+  const fromRef = useRef(value ?? 0);
+  const rafRef = useRef(null);
 
   useEffect(() => {
-    const to = Number(value) || 0;
+    if (value == null || Number.isNaN(value)) return;
     const from = fromRef.current;
-    const reduced =
-      typeof window !== 'undefined' &&
-      window.matchMedia &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const to = value;
+    const start = performance.now();
 
-    if (reduced || from === to) {
-      setDisplay(to);
-      fromRef.current = to;
-      return undefined;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+    function tick(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - (1 - t) * (1 - t);
+      setDisplay(from + (to - from) * eased);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      else fromRef.current = to;
     }
-
-    let start = 0;
-    const ease = (t) => 1 - Math.pow(1 - t, 3);
-    const step = (ts) => {
-      if (!start) start = ts;
-      const p = Math.min(1, (ts - start) / duration);
-      setDisplay(from + (to - from) * ease(p));
-      if (p < 1) {
-        rafRef.current = requestAnimationFrame(step);
-      } else {
-        fromRef.current = to;
-      }
-    };
-    rafRef.current = requestAnimationFrame(step);
+    rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [value, duration]);
 
-  return <span className={`num ${className}`}>{format(display)}</span>;
+  return <span className={className}>{format(display)}</span>;
 }

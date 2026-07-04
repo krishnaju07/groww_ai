@@ -1,24 +1,24 @@
 import { Router } from 'express';
-import stocksRoutes from './stocks.routes.js';
-import portfolioRoutes from './portfolio.routes.js';
-import tradesRoutes from './trades.routes.js';
-import settingsRoutes from './settings.routes.js';
-import backtestRoutes from './backtest.routes.js';
-import dashboardRoutes from './dashboard.routes.js';
-import tradingModeRoutes from './tradingMode.routes.js';
+import { healthRoutes } from './health.routes.js';
+import { stocksRoutes } from './stocks.routes.js';
+import { dashboardRoutes } from './dashboard.routes.js';
+import { portfolioRoutes } from './portfolio.routes.js';
+import { ordersRoutes } from './orders.routes.js';
+import { tradesRoutes } from './trades.routes.js';
+import { settingsRoutes } from './settings.routes.js';
+import { riskRoutes } from './risk.routes.js';
+import { aiRoutes } from './ai.routes.js';
+import { brokersRoutes } from './brokers.routes.js';
 
-/**
- * Top-level API router. Mounted by server.js under `/api` (imported as `apiRouter`).
- * Each sub-router owns one resource group from §11.
- */
-const router = Router();
+export const apiRoutes = Router();
 
-router.use('/stocks', stocksRoutes);
-router.use('/portfolio', portfolioRoutes);
-router.use('/trades', tradesRoutes);
-router.use('/settings', settingsRoutes);
-router.use('/backtest', backtestRoutes);
-router.use('/dashboard', dashboardRoutes);
-router.use('/trading-mode', tradingModeRoutes);
-
-export default router;
+apiRoutes.use('/health', healthRoutes);
+apiRoutes.use('/stocks', stocksRoutes);
+apiRoutes.use('/dashboard', dashboardRoutes);
+apiRoutes.use('/portfolio', portfolioRoutes);
+apiRoutes.use('/orders', ordersRoutes);
+apiRoutes.use('/trades', tradesRoutes);
+apiRoutes.use('/settings', settingsRoutes);
+apiRoutes.use('/risk', riskRoutes);
+apiRoutes.use('/ai', aiRoutes);
+apiRoutes.use('/brokers', brokersRoutes);

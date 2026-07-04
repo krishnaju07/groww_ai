@@ -1,33 +1,18 @@
 /**
- * Build an Express middleware that validates a request segment against a zod
- * schema. On success the parsed (and coerced) value replaces the original
- * `req[source]`. On failure it throws an Error with `.code = 'VALIDATION_ERROR'`
- * (mapped to HTTP 400 by the global error handler), with a concise message
- * summarizing the field issues.
- *
- * @param {import('zod').ZodTypeAny} schema  zod schema to validate against
- * @param {'body'|'query'|'params'} [source='body']  which request segment to validate
+ * @param {import('zod').ZodSchema} schema
+ * @param {'body'|'query'|'params'} [source]
  * @returns {import('express').RequestHandler}
  */
 export function validate(schema, source = 'body') {
-  return function validateMiddleware(req, _res, next) {
+  return (req, res, next) => {
     const result = schema.safeParse(req[source]);
     if (!result.success) {
-      const issues = result.error.issues
-        .map((i) => {
-          const path = i.path && i.path.length ? i.path.join('.') : source;
-          return `${path}: ${i.message}`;
-        })
-        .join('; ');
-      const err = new Error(`Validation failed — ${issues}`);
-      err.code = 'VALIDATION_ERROR';
-      err.status = 400;
-      return next(err);
+      const e = new Error(result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+      e.status = 400;
+      e.code = 'VALIDATION_ERROR';
+      return next(e);
     }
-    // Replace with parsed/coerced data so handlers get clean, typed values.
     req[source] = result.data;
-    return next();
+    next();
   };
 }
-
-export default validate;

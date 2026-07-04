@@ -1,137 +1,65 @@
-import { MarketDataProvider, findUniverse } from './MarketDataProvider.js';
 import { env } from '../../config/env.js';
 
-/**
- * @typedef {import('../../types.js').StockQuote} StockQuote
- * @typedef {import('../../types.js').Candle} Candle
- */
+/** Alpha Vantage free tier (5 req/min, 25/day) — NSE symbols via the `.BSE`/`.NS` exchange suffix isn't supported for India on the free tier's GLOBAL_QUOTE, so this is best-effort and mainly useful as a secondary/backup provider. */
+const BASE_URL = 'https://www.alphavantage.co/query';
 
-const ALPHA_BASE_URL = 'https://www.alphavantage.co/query';
-
-/**
- * Market-data provider backed by Alpha Vantage (requires an API key, rate
- * limited on the free tier). NIFTY50 has no Alpha ticker and is unsupported.
- */
-export class AlphaVantageProvider extends MarketDataProvider {
-  name = 'alphavantage';
-
-  /**
-   * @throws {Error} when the API key is missing
-   */
-  requireKey() {
-    if (!env.ALPHA_VANTAGE_API_KEY) {
-      throw new Error('ALPHA_VANTAGE_API_KEY is not configured');
-    }
-  }
-
-  /**
-   * Resolve the Alpha ticker for a canonical symbol.
-   *
-   * @param {string} symbol
-   * @returns {{u: ReturnType<typeof findUniverse>, ticker: string}}
-   * @throws {Error} when the symbol has no Alpha ticker (e.g. NIFTY50)
-   */
-  resolve(symbol) {
-    const u = findUniverse(symbol);
-    if (!u.alpha) {
-      throw new Error(`Alpha Vantage does not support ${symbol}`);
-    }
-    return { u, ticker: u.alpha };
-  }
-
-  /**
-   * Guard against Alpha Vantage's soft-error envelopes (rate limiting etc.).
-   *
-   * @param {any} json
-   */
-  static assertNotThrottled(json) {
-    if (json?.Note || json?.Information || json?.['Error Message']) {
-      throw new Error(
-        `Alpha Vantage error: ${json.Note || json.Information || json['Error Message']}`,
-      );
-    }
-  }
-
-  /**
-   * @param {string} symbol canonical symbol
-   * @returns {Promise<StockQuote>}
-   */
-  async getQuote(symbol) {
-    this.requireKey();
-    const { u, ticker } = this.resolve(symbol);
-    const params = new URLSearchParams({
-      function: 'GLOBAL_QUOTE',
-      symbol: ticker,
-      apikey: env.ALPHA_VANTAGE_API_KEY,
-    });
-    const res = await fetch(`${ALPHA_BASE_URL}?${params.toString()}`);
-    if (!res.ok) {
-      throw new Error(`Alpha Vantage quote failed for ${symbol}: HTTP ${res.status}`);
-    }
-    const json = await res.json();
-    AlphaVantageProvider.assertNotThrottled(json);
-    const q = json?.['Global Quote'];
-    if (!q || Object.keys(q).length === 0) {
-      throw new Error(`Alpha Vantage quote: empty for ${symbol}`);
-    }
-    const price = Number(q['05. price'] ?? 0);
-    const previousClose = Number(q['08. previous close'] ?? price);
-    const change = Number(q['09. change'] ?? price - previousClose);
-    const changePercent = Number(
-      String(q['10. change percent'] ?? '0').replace('%', ''),
-    );
-    return {
-      symbol: u.symbol,
-      name: u.name,
-      price,
-      change,
-      changePercent,
-      open: Number(q['02. open'] ?? price),
-      high: Number(q['03. high'] ?? price),
-      low: Number(q['04. low'] ?? price),
-      previousClose,
-      volume: Number(q['06. volume'] ?? 0),
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  /**
-   * @param {string} symbol canonical symbol
-   * @param {number} days
-   * @returns {Promise<Candle[]>}
-   */
-  async getHistory(symbol, days) {
-    this.requireKey();
-    const { ticker } = this.resolve(symbol);
-    const params = new URLSearchParams({
-      function: 'TIME_SERIES_DAILY',
-      symbol: ticker,
-      outputsize: days > 100 ? 'full' : 'compact',
-      apikey: env.ALPHA_VANTAGE_API_KEY,
-    });
-    const res = await fetch(`${ALPHA_BASE_URL}?${params.toString()}`);
-    if (!res.ok) {
-      throw new Error(`Alpha Vantage history failed for ${symbol}: HTTP ${res.status}`);
-    }
-    const json = await res.json();
-    AlphaVantageProvider.assertNotThrottled(json);
-    const series = json?.['Time Series (Daily)'];
-    if (!series) {
-      throw new Error(`Alpha Vantage history: empty for ${symbol}`);
-    }
-    /** @type {Candle[]} */
-    const candles = Object.entries(series).map(([date, v]) => ({
-      date,
-      open: Number(v['1. open']),
-      high: Number(v['2. high']),
-      low: Number(v['3. low']),
-      close: Number(v['4. close']),
-      volume: Number(v['5. volume'] ?? 0),
-    }));
-    // Alpha Vantage returns newest-first; sort ascending and trim to `days`.
-    candles.sort((a, b) => a.date.localeCompare(b.date));
-    return candles.slice(-days);
-  }
+async function req(params) {
+  if (!env.ALPHA_VANTAGE_API_KEY) throw new Error('ALPHA_VANTAGE_API_KEY not configured');
+  const qs = new URLSearchParams({ ...params, apikey: env.ALPHA_VANTAGE_API_KEY });
+  const res = await fetch(`${BASE_URL}?${qs}`);
+  if (!res.ok) throw new Error(`AlphaVantage HTTP ${res.status}`);
+  const json = await res.json();
+  if (json?.Note || json?.Information) throw new Error(json.Note || json.Information);
+  return json;
 }
 
-export default AlphaVantageProvider;
+export const AlphaVantageProvider = {
+  name: 'alphavantage',
+
+  /** @param {string} symbol @returns {Promise<number>} */
+  async getLTP(symbol) {
+    const json = await req({ function: 'GLOBAL_QUOTE', symbol: `${symbol}.BSE` });
+    const price = Number(json?.['Global Quote']?.['05. price']);
+    if (!price) throw new Error(`AlphaVantage LTP ${symbol} → no price`);
+    return price;
+  },
+
+  /** @param {string[]} symbols @returns {Promise<Record<string, number>>} */
+  async getLTPBatch(symbols) {
+    const out = {};
+    for (const s of symbols) {
+      try {
+        out[s] = await this.getLTP(s);
+      } catch {
+        // best-effort; caller falls back to mock for symbols this tier can't resolve
+      }
+    }
+    return out;
+  },
+
+  /**
+   * @param {string} symbol
+   * @param {'1m'|'5m'|'15m'|'1d'} interval
+   * @param {number} [limit]
+   * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
+   */
+  async getCandles(symbol, interval = '5m', limit = 100) {
+    const fn = interval === '1d' ? 'TIME_SERIES_DAILY' : 'TIME_SERIES_INTRADAY';
+    const params = { function: fn, symbol: `${symbol}.BSE`, outputsize: 'compact' };
+    if (fn === 'TIME_SERIES_INTRADAY') params.interval = interval;
+    const json = await req(params);
+    const seriesKey = Object.keys(json).find((k) => k.toLowerCase().includes('time series'));
+    const series = json[seriesKey] ?? {};
+    const candles = Object.entries(series)
+      .map(([time, ohlcv]) => ({
+        time: new Date(time),
+        open: Number(ohlcv['1. open']),
+        high: Number(ohlcv['2. high']),
+        low: Number(ohlcv['3. low']),
+        close: Number(ohlcv['4. close']),
+        volume: Number(ohlcv['5. volume']),
+      }))
+      .sort((a, b) => a.time - b.time);
+    return candles.slice(-limit);
+  },
+};

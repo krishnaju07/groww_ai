@@ -1,50 +1,30 @@
 import { create } from 'zustand';
-import { getStocks } from '../services/stocks.service.js';
+import { stocksService } from '../services/stocks.service.js';
+import { dashboardService } from '../services/dashboard.service.js';
 
-/**
- * @typedef {import('../types.js').StockQuote} StockQuote
- */
-
-/**
- * Stocks store: holds the live universe quotes.
- * @typedef {Object} StocksState
- * @property {StockQuote[]} stocks
- * @property {boolean} loading
- * @property {string|null} error
- * @property {() => Promise<void>} fetchStocks
- */
-
-// Module-level request de-dup: collapse concurrent fetchStocks() calls (many
-// components request the universe at once) into a single in-flight request, and
-// skip re-fetching within a short TTL since quotes change slowly.
-let stocksInflight = null;
-let stocksFetchedAt = 0;
-const STOCKS_TTL_MS = 5000;
-
-/** @type {import('zustand').UseBoundStore<import('zustand').StoreApi<StocksState>>} */
-const useStocksStore = create((set, get) => ({
-  stocks: [],
+export const useStocksStore = create((set, get) => ({
+  universe: [],
+  watchlist: [],
   loading: false,
   error: null,
-  fetchStocks() {
-    if (stocksInflight) return stocksInflight;
-    if (get().stocks.length && Date.now() - stocksFetchedAt < STOCKS_TTL_MS) {
-      return Promise.resolve();
+  _inFlight: false,
+
+  async fetchUniverse() {
+    if (get().universe.length) return;
+    const universe = await stocksService.list();
+    set({ universe });
+  },
+
+  async fetchWatchlist() {
+    if (get()._inFlight) return;
+    set({ _inFlight: true, loading: !get().watchlist.length });
+    try {
+      const watchlist = await dashboardService.watchlist();
+      set({ watchlist, loading: false, error: null });
+    } catch (err) {
+      set({ loading: false, error: err.message });
+    } finally {
+      set({ _inFlight: false });
     }
-    set({ loading: true, error: null });
-    stocksInflight = (async () => {
-      try {
-        const stocks = await getStocks();
-        stocksFetchedAt = Date.now();
-        set({ stocks, loading: false });
-      } catch (err) {
-        set({ error: err.message || 'Failed to load stocks', loading: false });
-      } finally {
-        stocksInflight = null;
-      }
-    })();
-    return stocksInflight;
   },
 }));
-
-export default useStocksStore;

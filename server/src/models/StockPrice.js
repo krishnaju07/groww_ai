@@ -1,27 +1,25 @@
 import mongoose from 'mongoose';
 
-const { Schema, model } = mongoose;
-
-/**
- * Latest market snapshot per symbol (best-effort upsert by the market-data layer).
- * Mirrors the StockQuote DTO; one document per canonical symbol.
- */
-const stockPriceSchema = new Schema(
+/** Short-lived OHLCV candle cache per symbol, used by indicators/backtest when a provider needs history. */
+const StockPriceSchema = new mongoose.Schema(
   {
-    symbol: { type: String, required: true, unique: true, trim: true, uppercase: true },
-    price: { type: Number, required: true },
-    change: { type: Number, required: true },
-    changePercent: { type: Number, required: true },
-    open: { type: Number, required: true },
-    high: { type: Number, required: true },
-    low: { type: Number, required: true },
-    previousClose: { type: Number, required: true },
-    volume: { type: Number, required: true },
-    timestamp: { type: Date, required: true },
+    symbol: { type: String, required: true },
+    interval: { type: String, enum: ['1m', '5m', '15m', '1d'], required: true },
+    candles: [
+      {
+        time: { type: Date, required: true },
+        open: { type: Number, required: true },
+        high: { type: Number, required: true },
+        low: { type: Number, required: true },
+        close: { type: Number, required: true },
+        volume: { type: Number, required: true },
+      },
+    ],
+    fetchedAt: { type: Date, default: Date.now },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-const StockPrice = model('StockPrice', stockPriceSchema);
+StockPriceSchema.index({ symbol: 1, interval: 1 }, { unique: true });
 
-export default StockPrice;
+export const StockPrice = mongoose.models.StockPrice || mongoose.model('StockPrice', StockPriceSchema);

@@ -1,26 +1,23 @@
 import mongoose from 'mongoose';
+import { BROKERS } from '../config/constants.js';
 
-const { Schema, model } = mongoose;
-
-/**
- * An open holding for a user/symbol. Removed entirely on full SELL.
- * Live currentPrice/value/unrealized are derived at read time from a quote.
- */
-const positionSchema = new Schema(
+const PositionSchema = new mongoose.Schema(
   {
-    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    symbol: { type: String, required: true, trim: true, uppercase: true },
+    userId: { type: String, required: true },
+    broker: { type: String, enum: BROKERS, required: true },
+    symbol: { type: String, required: true },
     quantity: { type: Number, required: true },
     avgBuyPrice: { type: Number, required: true },
     investedAmount: { type: Number, required: true },
     highestPriceSeen: { type: Number, required: true },
-    openedAt: { type: Date, required: true, default: Date.now },
+    stopLoss: { type: Number, default: null },
+    target: { type: Number, default: null },
+    aiDecisionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AIDecisionLog', default: null },
+    openedAt: { type: Date, default: Date.now },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-positionSchema.index({ userId: 1, symbol: 1 }, { unique: true });
+PositionSchema.index({ userId: 1, broker: 1, symbol: 1 }, { unique: true });
 
-const Position = model('Position', positionSchema);
-
-export default Position;
+export const Position = mongoose.models.Position || mongoose.model('Position', PositionSchema);
