@@ -5,6 +5,7 @@
  * login-flow explanation.
  */
 import { getZerodhaClient } from './zerodhaAuth.js';
+import { retryFillCheck } from '../../utils/retryFillCheck.js';
 
 function mapStatus(kiteStatus) {
   const s = String(kiteStatus ?? '').toUpperCase();
@@ -54,16 +55,13 @@ export function createZerodhaBroker(userId) {
       });
       const brokerOrderId = res.order_id;
 
-      // MARKET orders on NSE cash equity fill near-instantly — check right away so
-      // recordLiveFill (orderService.js) actually gets a filledPrice/filledQuantity
-      // instead of always hardcoding PLACED. If it's not reflected yet, we still return
-      // whatever we have; the caller already tolerates a non-FILLED result.
-      try {
-        const detail = await this.getOrderStatus(brokerOrderId);
-        return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
-      } catch {
-        return { brokerOrderId, status: 'PLACED' };
-      }
+      // MARKET orders on NSE cash equity fill near-instantly — check (with a short retry
+      // backoff, see retryFillCheck.js) so recordLiveFill (orderService.js) actually gets
+      // a filledPrice/filledQuantity instead of always hardcoding PLACED. Whatever this
+      // still misses gets backfilled by orderReconciliationJob.js.
+      const detail = await retryFillCheck(() => this.getOrderStatus(brokerOrderId));
+      if (detail) return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
+      return { brokerOrderId, status: 'PLACED' };
     },
 
     async modifyOrder(orderId, patch) {

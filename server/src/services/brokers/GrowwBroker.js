@@ -8,6 +8,7 @@
  */
 import { GROWW_BASE_URL, GROWW_API_VERSION, GROWW_ORDER } from '../../config/constants.js';
 import { getAccessToken } from './growwAuth.js';
+import { retryFillCheck } from '../../utils/retryFillCheck.js';
 
 /** @param {string} symbol e.g. 'RELIANCE' @returns {string} Groww order trading_symbol, e.g. 'RELIANCE-EQ' (order endpoints only — quote/LTP endpoints use the bare symbol). */
 function toGrowwTradingSymbol(symbol) {
@@ -91,17 +92,14 @@ export function createGrowwBroker() {
         },
       });
 
-      // MARKET orders on NSE cash equity fill near-instantly — check right away so
-      // recordLiveFill (orderService.js) actually gets a filledPrice/filledQuantity
-      // instead of always silently no-op'ing. If it's not reflected yet, we still return
-      // whatever status we have; the caller already tolerates a non-FILLED result.
+      // MARKET orders on NSE cash equity fill near-instantly — check (with a short retry
+      // backoff, see retryFillCheck.js) so recordLiveFill (orderService.js) actually gets
+      // a filledPrice/filledQuantity instead of always silently no-op'ing. Whatever this
+      // still misses gets backfilled by orderReconciliationJob.js.
       const brokerOrderId = payload.groww_order_id;
-      try {
-        const detail = await this.getOrderStatus(brokerOrderId);
-        return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
-      } catch {
-        return { brokerOrderId, status: mapStatus(payload.order_status) };
-      }
+      const detail = await retryFillCheck(() => this.getOrderStatus(brokerOrderId));
+      if (detail) return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
+      return { brokerOrderId, status: mapStatus(payload.order_status) };
     },
 
     async modifyOrder(orderId, patch) {

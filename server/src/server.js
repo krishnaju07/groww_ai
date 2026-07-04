@@ -11,6 +11,7 @@ import { startBrokerHealthJob } from './jobs/brokerHealthJob.js';
 import { startAiScanJob } from './jobs/aiScanJob.js';
 import { startSquareOffJob } from './jobs/squareOffJob.js';
 import { startPositionGuardianJob } from './jobs/positionGuardianJob.js';
+import { startOrderReconciliationJob } from './jobs/orderReconciliationJob.js';
 
 async function main() {
   await connectDb();
@@ -32,6 +33,7 @@ async function main() {
   startAiScanJob();
   startSquareOffJob();
   startPositionGuardianJob();
+  startOrderReconciliationJob();
 }
 
 main().catch((err) => {

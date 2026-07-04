@@ -26,22 +26,43 @@ import { round2 } from '../utils/format.js';
  * checks (which read the Trade collection) would never see live trades, and
  * "Recent Trades"/the equity curve would silently only ever show paper activity.
  * Only handles orders the broker reports as immediately FILLED with a known
- * price (true for MARKET orders on NSE cash equity in practice) — a LIMIT
- * order left PLACED/PENDING isn't recorded yet since there's no fill price;
- * that would need order-status polling/webhooks to backfill later.
+ * price. Exported (not just called inline) because orderReconciliationJob.js
+ * reuses this exact logic to backfill a fill that raced the broker's order-status
+ * lookup at placement time — the caller (either placeOrder or the reconciliation
+ * job) is responsible for guarding against calling this twice for the same order
+ * (see Order.tradeId — set once a fill is recorded, checked before calling again).
  * @param {string} userId @param {string} brokerName
  * @param {{symbol:string, action:'BUY'|'SELL', quantity:number, stopLoss?:number, target?:number, source:string, triggerReason?:string, aiDecisionId?:string}} input
  * @param {{status:string, filledPrice?:number, filledQuantity?:number}} result
+ * @returns {Promise<import('mongoose').Types.ObjectId|null>} the created Trade's _id, or null if not actually filled
  */
-async function recordLiveFill(userId, brokerName, input, result) {
-  if (result.status !== 'FILLED' || !result.filledPrice) return;
+export async function recordLiveFill(userId, brokerName, input, result) {
+  if (result.status !== 'FILLED' || !result.filledPrice) return null;
 
   const price = result.filledPrice;
   const quantity = result.filledQuantity || input.quantity;
 
   if (input.action === 'BUY') {
+    // Position mutation happens first, Trade.create last — if this whole function gets
+    // called twice for the same physical fill (e.g. reconciliation retrying after a
+    // partial failure), neither ordering is perfectly idempotent without a real
+    // transaction, but keeping the simple single-document Trade.create as the final
+    // "commit point" — the thing tradeId is keyed off — shrinks the failure window to
+    // just that one write, rather than leaving an orphaned Trade with no position update.
     const investmentAmount = round2(price * quantity);
-    await Trade.create({
+    await applyBuyToPosition({
+      userId,
+      broker: brokerName,
+      symbol: input.symbol,
+      quantity,
+      investmentAmount,
+      price,
+      stopLoss: input.stopLoss,
+      target: input.target,
+      aiDecisionId: input.aiDecisionId,
+    });
+
+    const trade = await Trade.create({
       userId,
       broker: brokerName,
       mode: 'live',
@@ -55,19 +76,7 @@ async function recordLiveFill(userId, brokerName, input, result) {
       status: 'OPEN',
       aiDecisionId: input.aiDecisionId ?? null,
     });
-
-    await applyBuyToPosition({
-      userId,
-      broker: brokerName,
-      symbol: input.symbol,
-      quantity,
-      investmentAmount,
-      price,
-      stopLoss: input.stopLoss,
-      target: input.target,
-      aiDecisionId: input.aiDecisionId,
-    });
-    return;
+    return trade._id;
   }
 
   // SELL — the real broker sell already succeeded before this bookkeeping runs, so a
@@ -84,7 +93,7 @@ async function recordLiveFill(userId, brokerName, input, result) {
   }
   const pnl = round2(proceeds - costBasis);
 
-  await Trade.create({
+  const trade = await Trade.create({
     userId,
     broker: brokerName,
     mode: 'live',
@@ -101,6 +110,7 @@ async function recordLiveFill(userId, brokerName, input, result) {
     aiDecisionId: input.aiDecisionId ?? null,
     closedAt: new Date(),
   });
+  return trade._id;
 }
 
 function codedError(message, code, status = 400) {
@@ -266,10 +276,19 @@ export async function placeOrder(userId, input) {
 
     if (mode === 'live') {
       try {
-        await recordLiveFill(userId, brokerName, input, result);
+        const tradeId = await recordLiveFill(userId, brokerName, input, result);
+        if (tradeId) {
+          orderDoc.tradeId = tradeId;
+          await orderDoc.save();
+        }
+        // If the broker hasn't reported FILLED yet (result.status is still PLACED/PENDING
+        // — the getOrderStatus race the broker adapters retry internally, but can still
+        // miss), tradeId stays null and orderReconciliationJob.js picks this order up on
+        // its next pass to re-check and backfill the fill once it actually lands.
       } catch (err) {
         // Never let bookkeeping failure hide a real broker fill from the caller —
-        // the order already went through; log loudly and move on.
+        // the order already went through; log loudly and move on. Reconciliation will
+        // retry this too, since tradeId never got set.
         console.error(`[orderService] recordLiveFill failed for order ${orderDoc._id}:`, err);
       }
     }
