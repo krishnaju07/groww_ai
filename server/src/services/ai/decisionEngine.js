@@ -151,5 +151,5 @@ export async function decide(userId, symbol) {
     indicatorsSnapshot: ctx,
   });
 
-  return { ...primary, decisionId: String(log._id), models };
+  return { ...primary, decisionId: String(log._id), models, indicatorsSnapshot: ctx };
 }

@@ -1,6 +1,11 @@
-import { RSI, MACD, SMA } from 'technicalindicators';
+import { RSI, MACD, SMA, PSAR, ATR } from 'technicalindicators';
 import { INDICATOR_CONFIG } from '../config/constants.js';
 import { round2 } from '../utils/format.js';
+
+const PSAR_STEP = 0.02;
+const PSAR_MAX = 0.2;
+const SUPERTREND_PERIOD = 10;
+const SUPERTREND_MULTIPLIER = 3;
 
 /** @param {number[]} closes @returns {number} 0-100, defaults to 50 (neutral) when there's not enough history */
 export function rsi(closes) {
@@ -54,4 +59,55 @@ export function momentum(closes) {
   const first = closes[0];
   const last = closes.at(-1);
   return round2(((last - first) / first) * 100);
+}
+
+/**
+ * Parabolic SAR — a trailing stop-and-reverse dot. Price above the dot = bullish
+ * (dot acts as support), price below = bearish (dot acts as resistance).
+ * @param {{high:number[], low:number[], close:number[]}} ohlc
+ * @returns {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}}
+ */
+export function parabolicSar({ high, low, close }) {
+  const values = PSAR.calculate({ high, low, step: PSAR_STEP, max: PSAR_MAX });
+  const value = values.at(-1);
+  const lastClose = close.at(-1);
+  if (value == null || lastClose == null) return { value: round2(lastClose ?? 0), trend: 'SIDEWAYS' };
+  return { value: round2(value), trend: lastClose > value ? 'UP' : 'DOWN' };
+}
+
+/**
+ * Supertrend — an ATR-based trailing band that flips between acting as support
+ * (uptrend) and resistance (downtrend). Not shipped by `technicalindicators`, so
+ * it's built here from its ATR output using the standard formulation (ratcheting
+ * bands + a trend flip when price crosses the previous bar's band).
+ * @param {{high:number[], low:number[], close:number[]}} ohlc
+ * @returns {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}}
+ */
+export function supertrend({ high, low, close }) {
+  const atrValues = ATR.calculate({ high, low, close, period: SUPERTREND_PERIOD });
+  const offset = high.length - atrValues.length;
+  if (offset < 0 || atrValues.length < 2) {
+    return { value: round2(close.at(-1) ?? 0), trend: 'SIDEWAYS' };
+  }
+
+  let trendUp = true;
+  let up = (high[offset] + low[offset]) / 2 - SUPERTREND_MULTIPLIER * atrValues[0];
+  let dn = (high[offset] + low[offset]) / 2 + SUPERTREND_MULTIPLIER * atrValues[0];
+
+  for (let i = 1; i < atrValues.length; i++) {
+    const idx = offset + i;
+    const upPrev = up;
+    const dnPrev = dn;
+
+    const mid = (high[idx] + low[idx]) / 2;
+    const candidateUp = mid - SUPERTREND_MULTIPLIER * atrValues[i];
+    const candidateDn = mid + SUPERTREND_MULTIPLIER * atrValues[i];
+
+    up = close[idx - 1] > upPrev ? Math.max(candidateUp, upPrev) : candidateUp;
+    dn = close[idx - 1] < dnPrev ? Math.min(candidateDn, dnPrev) : candidateDn;
+
+    trendUp = trendUp ? close[idx] >= upPrev : close[idx] > dnPrev;
+  }
+
+  return { value: round2(trendUp ? up : dn), trend: trendUp ? 'UP' : 'DOWN' };
 }

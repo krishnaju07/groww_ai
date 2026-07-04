@@ -49,6 +49,22 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000) {
     reasons.push('timeframes disagree — no trend confluence');
   }
 
+  if (ctx.psar?.trend === 'UP') {
+    score += 1;
+    reasons.push(`Parabolic SAR bullish (price above ₹${ctx.psar.value})`);
+  } else if (ctx.psar?.trend === 'DOWN') {
+    score -= 1;
+    reasons.push(`Parabolic SAR bearish (price below ₹${ctx.psar.value})`);
+  }
+
+  if (ctx.supertrend?.trend === 'UP') {
+    score += 1;
+    reasons.push(`Supertrend bullish (₹${ctx.supertrend.value})`);
+  } else if (ctx.supertrend?.trend === 'DOWN') {
+    score -= 1;
+    reasons.push(`Supertrend bearish (₹${ctx.supertrend.value})`);
+  }
+
   if (ctx.levels.support && ctx.ltp <= ctx.levels.support * 1.005) {
     score += 1;
     reasons.push('price near support');
@@ -68,7 +84,7 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000) {
   const volumeConfirmed = ctx.volumeRatio >= 1.2;
   if (volumeConfirmed) reasons.push(`volume ${ctx.volumeRatio}x average confirms move`);
 
-  const confidence = Math.min(95, Math.round((Math.abs(score) / 8) * 100 * (volumeConfirmed ? 1 : 0.7)));
+  const confidence = Math.min(95, Math.round((Math.abs(score) / 10) * 100 * (volumeConfirmed ? 1 : 0.7)));
 
   if (score >= BUY_THRESHOLD) {
     const quantity = Math.max(1, Math.floor(investmentAmount / ctx.ltp));

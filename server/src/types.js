@@ -76,6 +76,8 @@
  * @property {'UP'|'DOWN'|'SIDEWAYS'} trendShortTerm 5m-candle trend
  * @property {'UP'|'DOWN'|'SIDEWAYS'} trendMediumTerm 15m-candle trend
  * @property {'UP'|'DOWN'|'SIDEWAYS'} trendLongTerm 30m-candle trend
+ * @property {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}} psar Parabolic SAR (5m) — price above the dot is bullish
+ * @property {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}} supertrend ATR-based Supertrend (5m)
  * @property {{support:number, resistance:number}} levels
  * @property {string} sector
  * @property {number} sectorRelativeStrength this stock's day momentum minus its sector peers' average, in percent

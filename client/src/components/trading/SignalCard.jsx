@@ -2,6 +2,7 @@ import { Card } from '../common/Card.jsx';
 import { Badge } from '../common/Badge.jsx';
 import { ConfidenceMeter } from '../common/ConfidenceMeter.jsx';
 import { Spinner } from '../common/Spinner.jsx';
+import { IndicatorBreakdown } from '../common/IndicatorBreakdown.jsx';
 import { BTN_PRIMARY } from '../../lib/ui.js';
 import { formatINR } from '../../lib/format.js';
 
@@ -47,6 +48,13 @@ export function SignalCard({ symbol, decision, loading, onAskAI }) {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {decision?.indicatorsSnapshot && (
+        <div className="mt-4">
+          <div className="mb-1.5 text-xs font-medium text-muted">Indicators behind this call</div>
+          <IndicatorBreakdown snapshot={decision.indicatorsSnapshot} />
         </div>
       )}
     </Card>
