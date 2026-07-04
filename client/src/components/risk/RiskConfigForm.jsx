@@ -20,6 +20,7 @@ export function RiskConfigForm({ config, onSave }) {
         maxLossPerTrade: form.maxLossPerTrade,
         maxTradesPerDay: form.maxTradesPerDay,
         maxCapitalPerTradePercent: form.maxCapitalPerTradePercent,
+        dailyProfitLockPercent: form.dailyProfitLockPercent,
       });
       toast.success('Risk config updated');
     } catch (err) {
@@ -56,6 +57,16 @@ export function RiskConfigForm({ config, onSave }) {
             value={form.maxCapitalPerTradePercent}
             onChange={(e) => setForm((f) => ({ ...f, maxCapitalPerTradePercent: parseFloat(e.target.value) || 0 }))}
           />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Daily profit lock (% of capital, 0 = off)</label>
+          <input
+            type="number"
+            className={INPUT}
+            value={form.dailyProfitLockPercent ?? 0}
+            onChange={(e) => setForm((f) => ({ ...f, dailyProfitLockPercent: parseFloat(e.target.value) || 0 }))}
+          />
+          <p className="mt-1 text-xs text-muted">Once today's realized profit hits this %, new entries pause — open positions can still be closed.</p>
         </div>
       </div>
       <button onClick={save} className={`${BTN_PRIMARY} mt-4`}>

@@ -7,6 +7,6 @@ export const healthRoutes = Router();
 healthRoutes.get(
   '/',
   asyncHandler(async (req, res) => {
-    res.json({ success: true, data: { status: 'ok', marketDataProvider: marketData.providerName, time: new Date() } });
+    res.json({ success: true, data: { status: 'ok', marketDataProvider: await marketData.getProviderName(), time: new Date() } });
   }),
 );

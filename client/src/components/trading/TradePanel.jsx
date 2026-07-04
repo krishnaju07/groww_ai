@@ -21,6 +21,14 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced }) {
   const tradingMode = useSettingsStore((s) => s.tradingMode);
   const isLive = tradingMode?.mode === 'live' && tradingMode?.liveAvailable;
 
+  // Reset price-tied fields whenever the symbol changes — otherwise a stop-loss/target
+  // computed for the previous (differently-priced) symbol silently carries over.
+  useEffect(() => {
+    setQuantity(1);
+    setStopLoss(0);
+    setTarget(0);
+  }, [symbol]);
+
   useEffect(() => {
     if (decision && decision.action !== 'WAIT') {
       setAction(decision.action);

@@ -33,6 +33,9 @@ export const AI_ACTIONS = /** @type {const} */ (['BUY', 'SELL', 'WAIT']);
 /** LLM providers the decision engine can call — switchable live from Settings. */
 export const AI_PROVIDERS = /** @type {const} */ (['claude', 'openai']);
 
+/** Market-data providers — switchable live from Settings (UserSettings.systemConfig.marketDataProvider). */
+export const MARKET_DATA_PROVIDERS = /** @type {const} */ (['yahoo', 'groww', 'alphavantage', 'mock']);
+
 export const ORDER_STATUSES = /** @type {const} */ ([
   'PENDING',
   'PLACED',
@@ -50,6 +53,7 @@ export const DEFAULT_RISK_CONFIG = {
   maxLossPerTrade: 500,
   maxTradesPerDay: 10,
   maxCapitalPerTradePercent: 5,
+  dailyProfitLockPercent: 2,
   killSwitchEngaged: false,
 };
 

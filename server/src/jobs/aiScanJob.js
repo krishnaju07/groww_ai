@@ -3,19 +3,21 @@ import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../config/constants.js';
 import { decide } from '../services/ai/decisionEngine.js';
 import { setSignal } from '../services/ai/signalCache.js';
 import { isMarketOpen } from '../utils/marketHours.js';
-import { env } from '../config/env.js';
+import { getSystemConfig } from '../services/config/systemConfig.js';
 
 let running = false;
+let lastScanAt = 0;
 
 /**
  * Read-only background sweep across the whole watchlist — never places an
- * order. Runs independent of AUTO_TRADING_ENABLED; powers the Dashboard "AI
- * Top Picks", StockSelector signal badges, and Portfolio "AI View" exit hints
- * via signalCache. Reuses decide() (the same pipeline "Ask AI" uses), so every
- * scan is also fully audited in AIDecisionLog, WAIT calls included.
+ * order. Runs independent of the auto-trading on/off switch; powers the
+ * Dashboard "AI Top Picks", StockSelector signal badges, and Portfolio "AI
+ * View" exit hints via signalCache. Reuses decide() (the same pipeline "Ask
+ * AI" uses), so every scan is also fully audited in AIDecisionLog, WAIT calls
+ * included.
  */
 export async function runAiScan(userId = DEFAULT_USER_ID) {
-  if (!isMarketOpen()) return { ran: false, reason: 'market closed' };
+  if (!(await isMarketOpen(userId))) return { ran: false, reason: 'market closed' };
 
   for (const { symbol } of STOCK_UNIVERSE) {
     try {
@@ -28,13 +30,21 @@ export async function runAiScan(userId = DEFAULT_USER_ID) {
   return { ran: true };
 }
 
-/** Registers the background AI scan on env.AI_SCAN_INTERVAL_MINUTES (default 5). */
+/**
+ * Registers the background AI scan. Ticks every minute and self-checks against
+ * the currently configured interval (systemConfig.aiScanIntervalMinutes, live-
+ * editable from Settings) — this way a change to the interval takes effect on
+ * the next tick, no server restart or cron re-scheduling needed.
+ */
 export function startAiScanJob() {
-  const minutes = Math.max(1, Math.round(env.AI_SCAN_INTERVAL_MINUTES));
-  cron.schedule(`*/${minutes} * * * *`, async () => {
+  cron.schedule('* * * * *', async () => {
     if (running) return;
     running = true;
     try {
+      const { aiScanIntervalMinutes } = await getSystemConfig();
+      const intervalMs = Math.max(1, Math.round(aiScanIntervalMinutes)) * 60_000;
+      if (Date.now() - lastScanAt < intervalMs) return;
+      lastScanAt = Date.now();
       await runAiScan();
     } catch (err) {
       console.error('[aiScanJob] scan tick failed:', err);
@@ -42,5 +52,5 @@ export function startAiScanJob() {
       running = false;
     }
   });
-  console.log(`[aiScanJob] scheduled (every ${minutes}m)`);
+  console.log('[aiScanJob] scheduled (interval configurable live via Settings, default 5m)');
 }

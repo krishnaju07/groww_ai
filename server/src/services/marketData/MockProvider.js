@@ -62,7 +62,7 @@ export const MockProvider = {
    * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
    */
   async getCandles(symbol, interval = '5m', limit = 100) {
-    const stepMs = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1d': 86_400_000 }[interval] ?? 300_000;
+    const stepMs = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '30m': 1_800_000, '1d': 86_400_000 }[interval] ?? 300_000;
     const now = Date.now();
     const candles = [];
     for (let i = limit - 1; i >= 0; i--) {

@@ -1,8 +1,8 @@
-import { env } from '../../config/env.js';
 import { MockProvider } from './MockProvider.js';
 import { YahooFinanceProvider } from './YahooFinanceProvider.js';
 import { AlphaVantageProvider } from './AlphaVantageProvider.js';
 import { GrowwProvider } from './GrowwProvider.js';
+import { getSystemConfig } from '../config/systemConfig.js';
 
 const PROVIDERS = {
   yahoo: YahooFinanceProvider,
@@ -11,14 +11,18 @@ const PROVIDERS = {
   mock: MockProvider,
 };
 
-const primary = PROVIDERS[env.MARKET_DATA_PROVIDER] ?? YahooFinanceProvider;
+/** Live-editable via Settings (systemConfig.marketDataProvider) — no restart needed. */
+async function getPrimary() {
+  const { marketDataProvider } = await getSystemConfig();
+  return PROVIDERS[marketDataProvider] ?? YahooFinanceProvider;
+}
 
 const LTP_TTL_MS = 3000;
 const CANDLE_TTL_MS = 15_000;
 const ltpCache = new Map(); // symbol -> {value, at}
 const candleCache = new Map(); // `${symbol}:${interval}:${limit}` -> {value, at}
 
-async function withFallback(fn, fallbackFn, label) {
+async function withFallback(primary, fn, fallbackFn, label) {
   try {
     return await fn();
   } catch (err) {
@@ -30,13 +34,18 @@ async function withFallback(fn, fallbackFn, label) {
 }
 
 export const marketData = {
-  providerName: primary.name,
+  /** @returns {Promise<string>} the currently configured provider's name */
+  async getProviderName() {
+    return (await getPrimary()).name;
+  },
 
   /** @param {string} symbol @returns {Promise<number>} */
   async getLTP(symbol) {
     const cached = ltpCache.get(symbol);
     if (cached && Date.now() - cached.at < LTP_TTL_MS) return cached.value;
+    const primary = await getPrimary();
     const value = await withFallback(
+      primary,
       () => primary.getLTP(symbol),
       () => MockProvider.getLTP(symbol),
       `getLTP(${symbol})`,
@@ -52,7 +61,9 @@ export const marketData = {
       return !c || Date.now() - c.at >= LTP_TTL_MS;
     });
     if (uncached.length) {
+      const primary = await getPrimary();
       const fresh = await withFallback(
+        primary,
         () => primary.getLTPBatch(uncached),
         () => MockProvider.getLTPBatch(uncached),
         `getLTPBatch(${uncached.length})`,
@@ -66,7 +77,7 @@ export const marketData = {
 
   /**
    * @param {string} symbol
-   * @param {'1m'|'5m'|'15m'|'1d'} [interval]
+   * @param {'1m'|'5m'|'15m'|'30m'|'1d'} [interval]
    * @param {number} [limit]
    * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
    */
@@ -74,7 +85,9 @@ export const marketData = {
     const key = `${symbol}:${interval}:${limit}`;
     const cached = candleCache.get(key);
     if (cached && Date.now() - cached.at < CANDLE_TTL_MS) return cached.value;
+    const primary = await getPrimary();
     const value = await withFallback(
+      primary,
       () => primary.getCandles(symbol, interval, limit),
       () => MockProvider.getCandles(symbol, interval, limit),
       `getCandles(${symbol})`,

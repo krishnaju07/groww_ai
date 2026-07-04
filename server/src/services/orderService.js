@@ -5,7 +5,6 @@
  * to call a broker adapter's placeOrder directly. This is what makes the risk
  * gate and the live-trading safety gate structurally unbypassable.
  */
-import { env } from '../config/env.js';
 import { UserSettings } from '../models/UserSettings.js';
 import { Order } from '../models/Order.js';
 import { Trade } from '../models/Trade.js';
@@ -14,6 +13,7 @@ import { marketData } from './marketData/index.js';
 import { canTrade } from './risk/riskManager.js';
 import { effectiveMode, assertLiveAllowed } from './brokers/tradingModeService.js';
 import { brokerFor } from './brokers/registry.js';
+import { getSystemConfig } from './config/systemConfig.js';
 import { generateIdempotencyKey } from '../utils/idempotency.js';
 import { round2 } from '../utils/format.js';
 
@@ -137,11 +137,12 @@ export async function placeOrder(userId, input) {
 
   if (mode === 'live') {
     await assertLiveAllowed(userId, brokerName);
+    const systemConfig = await getSystemConfig(userId);
 
     if (source === 'automatic') {
-      if (!env.ENABLE_LIVE_AUTO_TRADING) {
+      if (!systemConfig.enableLiveAutoTrading) {
         throw codedError(
-          'Unattended live auto-trading is disabled (set ENABLE_LIVE_AUTO_TRADING=true to allow it).',
+          'Unattended live auto-trading is disabled (turn it on from Settings).',
           'LIVE_AUTO_TRADING_DISABLED',
           403,
         );
@@ -151,9 +152,9 @@ export async function placeOrder(userId, input) {
     }
 
     const estimatedValue = round2(estimatedPrice * input.quantity);
-    if (estimatedValue > env.LIVE_MAX_ORDER_VALUE) {
+    if (estimatedValue > systemConfig.liveMaxOrderValue) {
       throw codedError(
-        `Live order value ₹${estimatedValue} exceeds the configured cap ₹${env.LIVE_MAX_ORDER_VALUE}.`,
+        `Live order value ₹${estimatedValue} exceeds the configured cap ₹${systemConfig.liveMaxOrderValue}.`,
         'LIVE_ORDER_VALUE_EXCEEDED',
         403,
       );

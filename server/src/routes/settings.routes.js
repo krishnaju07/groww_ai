@@ -4,10 +4,12 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
 import { UserSettings } from '../models/UserSettings.js';
 import { getTradingModeStatus } from '../services/brokers/tradingModeService.js';
-import { BROKERS, TRADING_MODES, AI_PROVIDERS } from '../config/constants.js';
-import { env } from '../config/env.js';
+import { invalidateSystemConfigCache } from '../services/config/systemConfig.js';
+import { BROKERS, TRADING_MODES, AI_PROVIDERS, MARKET_DATA_PROVIDERS } from '../config/constants.js';
 
 export const settingsRoutes = Router();
+
+const CONFIRM_LIVE_AUTO_TRADING_PHRASE = 'ENABLE LIVE AUTO TRADING';
 
 settingsRoutes.get(
   '/',
@@ -17,7 +19,7 @@ settingsRoutes.get(
       { $setOnInsert: { userId: req.userId } },
       { upsert: true, new: true },
     );
-    res.json({ success: true, data: { ...settings.toObject(), aiScanIntervalMinutes: env.AI_SCAN_INTERVAL_MINUTES } });
+    res.json({ success: true, data: settings.toObject() });
   }),
 );
 
@@ -31,6 +33,7 @@ const SettingsPatchSchema = z.object({
       amountPerTrade: z.coerce.number().positive().optional(),
       maxOpenPositions: z.coerce.number().int().positive().optional(),
       requireAiConfirmation: z.boolean().optional(),
+      minConfidence: z.coerce.number().min(0).max(100).optional(),
     })
     .partial()
     .optional(),
@@ -41,6 +44,20 @@ const SettingsPatchSchema = z.object({
       targetPercent: z.coerce.number().positive().optional(),
       trailingEnabled: z.boolean().optional(),
       trailingPercent: z.coerce.number().positive().optional(),
+    })
+    .partial()
+    .optional(),
+  systemConfig: z
+    .object({
+      enableLiveTrading: z.boolean().optional(),
+      enableLiveAutoTrading: z.boolean().optional(),
+      liveMaxOrderValue: z.coerce.number().positive().optional(),
+      autoTradingEnabled: z.boolean().optional(),
+      ignoreMarketHours: z.boolean().optional(),
+      marketDataProvider: z.enum(MARKET_DATA_PROVIDERS).optional(),
+      aiScanIntervalMinutes: z.coerce.number().positive().optional(),
+      // Not persisted — only checked when enabling enableLiveAutoTrading, then discarded.
+      confirmPhrase: z.string().optional(),
     })
     .partial()
     .optional(),
@@ -57,7 +74,7 @@ const SettingsPatchSchema = z.object({
 function flattenSettingsUpdate(body) {
   const update = {};
   for (const [key, value] of Object.entries(body)) {
-    if (['autoInvest', 'autoExit'].includes(key) && value && typeof value === 'object') {
+    if (['autoInvest', 'autoExit', 'systemConfig'].includes(key) && value && typeof value === 'object') {
       for (const [subKey, subValue] of Object.entries(value)) {
         update[`${key}.${subKey}`] = subValue;
       }
@@ -72,11 +89,28 @@ settingsRoutes.put(
   '/',
   validate(SettingsPatchSchema),
   asyncHandler(async (req, res) => {
+    const { systemConfig, ...rest } = req.body;
+
+    // Enabling unattended real-money trading is the single highest-stakes toggle in
+    // the app — require a typed confirmation phrase, not just a click, same spirit
+    // as the per-order REAL MONEY modal. Only gates the false->true transition.
+    if (systemConfig?.enableLiveAutoTrading === true) {
+      if (systemConfig.confirmPhrase !== CONFIRM_LIVE_AUTO_TRADING_PHRASE) {
+        const e = new Error(`Type "${CONFIRM_LIVE_AUTO_TRADING_PHRASE}" exactly to confirm enabling unattended live-money trading.`);
+        e.code = 'CONFIRMATION_REQUIRED';
+        e.status = 400;
+        throw e;
+      }
+    }
+    if (systemConfig) delete systemConfig.confirmPhrase; // never persisted — one-shot gate only
+
+    const body = systemConfig ? { ...rest, systemConfig } : rest;
     const settings = await UserSettings.findOneAndUpdate(
       { userId: req.userId },
-      { $set: flattenSettingsUpdate(req.body) },
+      { $set: flattenSettingsUpdate(body) },
       { upsert: true, new: true },
     );
+    invalidateSystemConfigCache();
     res.json({ success: true, data: settings });
   }),
 );

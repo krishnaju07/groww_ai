@@ -4,9 +4,9 @@ import { INPUT } from '../../lib/ui.js';
 /**
  * Numeric input that displays a plain editable string internally (so it can be
  * momentarily empty while typing) and reports a parsed number to `onChange`.
- * @param {{value:number, onChange:(n:number)=>void, prefix?:string, placeholder?:string, className?:string}} props
+ * @param {{value:number, onChange:(n:number)=>void, onBlur?:()=>void, prefix?:string, placeholder?:string, className?:string}} props
  */
-export function INRInput({ value, onChange, prefix = '₹', placeholder, className = '' }) {
+export function INRInput({ value, onChange, onBlur, prefix = '₹', placeholder, className = '' }) {
   const [display, setDisplay] = useState(value != null ? String(value) : '');
 
   useEffect(() => {
@@ -28,6 +28,7 @@ export function INRInput({ value, onChange, prefix = '₹', placeholder, classNa
         inputMode="decimal"
         value={display}
         onChange={handleChange}
+        onBlur={onBlur}
         placeholder={placeholder}
         className={`${INPUT} ${prefix ? 'pl-8' : ''} ${className}`}
       />

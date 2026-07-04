@@ -62,6 +62,19 @@ export async function canTrade(userId, proposedOrder) {
 
   // Capital% and per-trade-loss checks only meaningfully apply to entries (BUY); a SELL just closes exposure.
   if (proposedOrder.action === 'BUY') {
+    const profitLockPercent = cfg.dailyProfitLockPercent ?? 2;
+    if (profitLockPercent > 0) {
+      const profitLockAmount = round2((profitLockPercent / 100) * today.totalCapital);
+      if (today.realizedPnl >= profitLockAmount) {
+        const result = {
+          allowed: false,
+          reason: `Daily profit lock hit — realized ₹${today.realizedPnl} ≥ ${profitLockPercent}% of capital (₹${profitLockAmount}). New entries paused for today; existing positions can still be closed.`,
+        };
+        await log('BLOCK', result.reason, { proposedOrder, today });
+        return result;
+      }
+    }
+
     const estValue = round2(proposedOrder.quantity * proposedOrder.estimatedPrice);
     const capitalPct = today.totalCapital ? round2((estValue / today.totalCapital) * 100) : 100;
     if (capitalPct > cfg.maxCapitalPerTradePercent) {

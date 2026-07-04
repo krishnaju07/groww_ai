@@ -34,17 +34,19 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000) {
     reasons.push('MACD histogram negative');
   }
 
-  if (ctx.trendShortTerm === 'UP') {
-    score += 1;
-    reasons.push('short-term uptrend');
-  } else if (ctx.trendShortTerm === 'DOWN') {
-    score -= 1;
-    reasons.push('short-term downtrend');
-  }
-
-  if (ctx.trendShortTerm !== 'SIDEWAYS' && ctx.trendShortTerm === ctx.trendMediumTerm) {
-    score += ctx.trendShortTerm === 'UP' ? 1 : -1;
-    reasons.push(`medium-term trend confirms (${ctx.trendMediumTerm})`);
+  // Multi-timeframe confluence: 5m/15m/30m trends must actually agree before this
+  // counts for much — a single 5m blip shouldn't move the score on its own.
+  const timeframes = [ctx.trendShortTerm, ctx.trendMediumTerm, ctx.trendLongTerm];
+  const upCount = timeframes.filter((t) => t === 'UP').length;
+  const downCount = timeframes.filter((t) => t === 'DOWN').length;
+  if (upCount >= 2) {
+    score += upCount === 3 ? 3 : 2;
+    reasons.push(`${upCount}/3 timeframes (5m/15m/30m) trending UP`);
+  } else if (downCount >= 2) {
+    score -= downCount === 3 ? 3 : 2;
+    reasons.push(`${downCount}/3 timeframes (5m/15m/30m) trending DOWN`);
+  } else {
+    reasons.push('timeframes disagree — no trend confluence');
   }
 
   if (ctx.levels.support && ctx.ltp <= ctx.levels.support * 1.005) {
@@ -66,7 +68,7 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000) {
   const volumeConfirmed = ctx.volumeRatio >= 1.2;
   if (volumeConfirmed) reasons.push(`volume ${ctx.volumeRatio}x average confirms move`);
 
-  const confidence = Math.min(95, Math.round((Math.abs(score) / 7) * 100 * (volumeConfirmed ? 1 : 0.7)));
+  const confidence = Math.min(95, Math.round((Math.abs(score) / 8) * 100 * (volumeConfirmed ? 1 : 0.7)));
 
   if (score >= BUY_THRESHOLD) {
     const quantity = Math.max(1, Math.floor(investmentAmount / ctx.ltp));

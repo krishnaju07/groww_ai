@@ -25,7 +25,7 @@ async function request(path, query) {
   return json?.payload ?? json;
 }
 
-const INTERVAL_MINUTES = { '1m': 1, '5m': 5, '15m': 15, '1d': 1440 };
+const INTERVAL_MINUTES = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1d': 1440 };
 
 export const GrowwProvider = {
   name: 'groww',

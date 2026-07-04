@@ -10,8 +10,8 @@ function yahooSymbol(symbol) {
   return `${symbol}.NS`;
 }
 
-const INTERVAL_MAP = { '1m': '1m', '5m': '5m', '15m': '15m', '1d': '1d' };
-const RANGE_MAP = { '1m': '1d', '5m': '5d', '15m': '1mo', '1d': '1y' };
+const INTERVAL_MAP = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1d': '1d' };
+const RANGE_MAP = { '1m': '1d', '5m': '5d', '15m': '1mo', '30m': '1mo', '1d': '1y' };
 
 async function fetchChart(symbol, interval = '5m', limit = 100) {
   const url = `${CHART_URL}/${yahooSymbol(symbol)}?interval=${INTERVAL_MAP[interval] ?? '5m'}&range=${RANGE_MAP[interval] ?? '5d'}`;

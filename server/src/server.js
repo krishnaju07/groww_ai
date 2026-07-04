@@ -9,6 +9,7 @@ import { apiRoutes } from './routes/index.js';
 import { startAutoTradingJob } from './jobs/autoTradingJob.js';
 import { startBrokerHealthJob } from './jobs/brokerHealthJob.js';
 import { startAiScanJob } from './jobs/aiScanJob.js';
+import { startSquareOffJob } from './jobs/squareOffJob.js';
 
 async function main() {
   await connectDb();
@@ -28,6 +29,7 @@ async function main() {
   startAutoTradingJob();
   startBrokerHealthJob();
   startAiScanJob();
+  startSquareOffJob();
 }
 
 main().catch((err) => {

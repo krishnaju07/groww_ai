@@ -17,8 +17,9 @@ import { buildContext } from './contextBuilder.js';
 import { scoreQuant } from './aiSignalService.js';
 import { callProvider } from './decisionEngine.js';
 import { placeOrder } from '../orderService.js';
+import { effectiveMode } from '../brokers/tradingModeService.js';
 import { isMarketOpen } from '../../utils/marketHours.js';
-import { env } from '../../config/env.js';
+import { getSystemConfig } from '../config/systemConfig.js';
 
 const AI_CONFIRM_COOLDOWN_MS = 5 * 60 * 1000; // don't re-confirm the same symbol more than once per 5 min
 const lastConfirmAttempt = new Map(); // symbol -> timestamp
@@ -62,14 +63,21 @@ async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx) {
 
 /** @returns {Promise<{ran:boolean, reason?:string, results?:object[]}>} */
 export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
-  if (!env.AUTO_TRADING_ENABLED) return { ran: false, reason: 'AUTO_TRADING_ENABLED=false' };
-  if (!isMarketOpen()) return { ran: false, reason: 'market closed' };
+  const systemConfig = await getSystemConfig(userId);
+  if (!systemConfig.autoTradingEnabled) return { ran: false, reason: 'auto-trading disabled in Settings' };
+  if (!(await isMarketOpen(userId))) return { ran: false, reason: 'market closed' };
 
   const settings = await UserSettings.findOne({ userId }).lean();
   if (!settings?.autoInvest?.enabled) return { ran: false, reason: 'autoInvest disabled' };
 
-  const openPositions = await Position.find({ userId, broker: 'paper' }).lean();
+  // Auto-trading follows whatever broker the user is effectively operating on right
+  // now (paper, or their connected live broker) — checking paper positions while the
+  // user trades live would blind this to real open exposure and could double-enter.
+  const mode = await effectiveMode(userId, settings);
+  const brokerName = mode === 'live' ? settings.activeBroker : 'paper';
+  const openPositions = await Position.find({ userId, broker: brokerName }).lean();
   const openSymbols = new Set(openPositions.map((p) => p.symbol));
+  const minConfidence = settings.autoInvest.minConfidence ?? 75;
   const results = [];
 
   for (const { symbol } of STOCK_UNIVERSE) {
@@ -78,6 +86,10 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       const quantDecision = scoreQuant(symbol, ctx, settings.autoInvest.amountPerTrade);
 
       if (quantDecision.action === 'WAIT') continue;
+      if (quantDecision.confidence < minConfidence) {
+        results.push({ symbol, action: quantDecision.action, status: 'SKIPPED_LOW_CONFIDENCE', confidence: quantDecision.confidence });
+        continue;
+      }
       if (quantDecision.action === 'BUY' && openSymbols.has(symbol)) continue;
       if (quantDecision.action === 'BUY' && openPositions.length >= settings.autoInvest.maxOpenPositions) continue;
       if (quantDecision.action === 'SELL' && !openSymbols.has(symbol)) continue;
