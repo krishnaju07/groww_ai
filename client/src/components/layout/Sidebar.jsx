@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LineChart, Wallet, ListOrdered, Sparkles, ShieldAlert, Plug, Settings } from 'lucide-react';
+import { LayoutDashboard, LineChart, Wallet, ListOrdered, Sparkles, Power, ShieldAlert, Plug, Settings } from 'lucide-react';
 
 const LINKS = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -7,6 +7,7 @@ const LINKS = [
   { to: '/portfolio', label: 'Portfolio', icon: Wallet },
   { to: '/orders', label: 'Orders', icon: ListOrdered },
   { to: '/ai-decisions', label: 'AI Decisions', icon: Sparkles },
+  { to: '/live-trading', label: 'Live Trading', icon: Power },
   { to: '/risk', label: 'Risk', icon: ShieldAlert },
   { to: '/brokers', label: 'Brokers', icon: Plug },
   { to: '/settings', label: 'Settings', icon: Settings },
@@ -41,7 +42,7 @@ export function Sidebar() {
       </nav>
 
       <div className="rounded-xl border border-border/70 bg-bg/40 p-3 text-xs text-muted">
-        Single-user paper trading account. Real-money mode is configured from Settings.
+        Single-user paper trading account. Real-money mode is configured from Live Trading.
       </div>
     </aside>
   );

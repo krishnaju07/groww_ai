@@ -8,6 +8,7 @@ import { Risk } from './pages/Risk.jsx';
 import { Settings } from './pages/Settings.jsx';
 import { Brokers } from './pages/Brokers.jsx';
 import { Orders } from './pages/Orders.jsx';
+import { LiveTrading } from './pages/LiveTrading.jsx';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/ai-decisions" element={<AIDecisions />} />
+        <Route path="/live-trading" element={<LiveTrading />} />
         <Route path="/risk" element={<Risk />} />
         <Route path="/brokers" element={<Brokers />} />
         <Route path="/settings" element={<Settings />} />

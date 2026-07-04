@@ -1,10 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { useSettingsStore } from '../store/useSettingsStore.js';
 import { Card } from '../components/common/Card.jsx';
 import { INRInput } from '../components/common/INRInput.jsx';
-import { Badge } from '../components/common/Badge.jsx';
-import { LiveAutoTradingConfirmModal } from '../components/common/LiveAutoTradingConfirmModal.jsx';
 import { BTN_PRIMARY, INPUT } from '../lib/ui.js';
 import { toast } from '../store/useToastStore.js';
 
@@ -17,11 +14,9 @@ const MARKET_DATA_PROVIDERS = [
 
 export function Settings() {
   const settings = useSettingsStore((s) => s.settings);
-  const tradingMode = useSettingsStore((s) => s.tradingMode);
   const fetch = useSettingsStore((s) => s.fetch);
   const update = useSettingsStore((s) => s.update);
   const [form, setForm] = useState(null);
-  const [showLiveAutoConfirm, setShowLiveAutoConfirm] = useState(false);
 
   useEffect(() => {
     fetch();
@@ -52,129 +47,16 @@ export function Settings() {
     }
   }
 
-  async function handleLiveAutoTradingToggle(enable) {
-    if (enable) {
-      setShowLiveAutoConfirm(true);
-      return;
-    }
-    await updateSystemConfig({ enableLiveAutoTrading: false }, 'Unattended live auto-trading turned off');
-  }
-
-  async function confirmLiveAutoTrading(typedPhrase) {
-    try {
-      await update({ systemConfig: { enableLiveAutoTrading: true, confirmPhrase: typedPhrase } });
-      toast.success('Unattended live auto-trading turned ON');
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setShowLiveAutoConfirm(false);
-    }
-  }
-
   return (
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted">Investment limits and the current trading-mode safety gate status.</p>
+        <p className="text-sm text-muted">AI behavior, investment limits, and operational tuning.</p>
       </div>
 
       <Card>
-        <div className="mb-4 font-display font-semibold">Trading Mode</div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted">Current mode</span>
-          <Badge tone={tradingMode?.mode === 'live' ? 'danger' : 'accent'}>{tradingMode?.mode?.toUpperCase() ?? 'PAPER'}</Badge>
-        </div>
-        <div className="mt-3 space-y-1 text-xs text-muted">
-          <div>Live trading enabled on server: {tradingMode?.liveEnabledEnv ? 'Yes' : 'No'}</div>
-          <div>Broker credential configured: {tradingMode?.hasCredential ? 'Yes' : 'No'}</div>
-          <div>Kill switch engaged: {tradingMode?.killSwitchEngaged ? 'Yes' : 'No'}</div>
-        </div>
-        <p className="mt-3 text-xs text-muted">
-          Real-broker connections and the live/paper switch are configured from the <Link to="/brokers" className="text-accent underline">Brokers page</Link>.
-        </p>
-      </Card>
-
-      <Card>
-        <div className="mb-4 font-display font-semibold">System Controls</div>
-        <p className="mb-3 text-xs text-muted">
-          These used to require editing the server's <span className="font-mono">.env</span> file and a restart. They're
-          now live-editable here — changes apply within a few seconds, no restart needed.
-        </p>
-
+        <div className="mb-4 font-display font-semibold">Market Data &amp; Scanning</div>
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-bg/30 p-3">
-            <div>
-              <div className="text-sm font-medium">Live trading (master switch)</div>
-              <p className="text-xs text-muted">Required before any real-money order — manual or automatic — can go through.</p>
-            </div>
-            <button
-              onClick={() =>
-                updateSystemConfig(
-                  { enableLiveTrading: !form.systemConfig?.enableLiveTrading },
-                  `Live trading turned ${!form.systemConfig?.enableLiveTrading ? 'ON' : 'off'}`,
-                )
-              }
-              className={`shrink-0 rounded-xl border px-4 py-2 text-xs font-semibold transition-colors ${
-                form.systemConfig?.enableLiveTrading
-                  ? 'border-danger/50 bg-danger/10 text-danger'
-                  : 'border-border/70 text-muted hover:border-border'
-              }`}
-            >
-              {form.systemConfig?.enableLiveTrading ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-danger/30 bg-danger/5 p-3">
-            <div>
-              <div className="text-sm font-medium">Unattended live auto-trading</div>
-              <p className="text-xs text-muted">
-                Lets the 30s auto-trading engine fire real-money orders with zero per-order confirmation. Turning this ON
-                requires typing a confirmation phrase.
-              </p>
-            </div>
-            <button
-              onClick={() => handleLiveAutoTradingToggle(!form.systemConfig?.enableLiveAutoTrading)}
-              className={`shrink-0 rounded-xl border px-4 py-2 text-xs font-semibold transition-colors ${
-                form.systemConfig?.enableLiveAutoTrading
-                  ? 'border-danger/50 bg-danger/10 text-danger'
-                  : 'border-border/70 text-muted hover:border-border'
-              }`}
-            >
-              {form.systemConfig?.enableLiveAutoTrading ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Max value per live order</label>
-            <INRInput
-              value={form.systemConfig?.liveMaxOrderValue ?? 5000}
-              onChange={(v) => setForm((f) => ({ ...f, systemConfig: { ...f.systemConfig, liveMaxOrderValue: v } }))}
-              onBlur={() => updateSystemConfig({ liveMaxOrderValue: form.systemConfig.liveMaxOrderValue }, 'Live order value cap updated')}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-bg/30 p-3">
-            <div>
-              <div className="text-sm font-medium">Auto-trading engine</div>
-              <p className="text-xs text-muted">Master on/off for the whole 30s auto-trading cron (paper and live alike).</p>
-            </div>
-            <button
-              onClick={() =>
-                updateSystemConfig(
-                  { autoTradingEnabled: !form.systemConfig?.autoTradingEnabled },
-                  `Auto-trading engine turned ${!form.systemConfig?.autoTradingEnabled ? 'on' : 'off'}`,
-                )
-              }
-              className={`shrink-0 rounded-xl border px-4 py-2 text-xs font-semibold transition-colors ${
-                form.systemConfig?.autoTradingEnabled
-                  ? 'border-accent/50 bg-accent/10 text-accent'
-                  : 'border-border/70 text-muted hover:border-border'
-              }`}
-            >
-              {form.systemConfig?.autoTradingEnabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
           <div>
             <label className="mb-1 block text-xs font-medium text-muted">Market data provider</label>
             <div className="grid grid-cols-2 gap-2">
@@ -238,10 +120,6 @@ export function Settings() {
             </button>
           </div>
         </div>
-
-        {showLiveAutoConfirm && (
-          <LiveAutoTradingConfirmModal onConfirm={confirmLiveAutoTrading} onCancel={() => setShowLiveAutoConfirm(false)} />
-        )}
       </Card>
 
       <Card>

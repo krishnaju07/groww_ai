@@ -1,37 +1,24 @@
-import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useBrokerStore } from '../store/useBrokerStore.js';
-import { useSettingsStore } from '../store/useSettingsStore.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { BrokerCard } from '../components/brokers/BrokerCard.jsx';
-import { TradingModeToggle } from '../components/brokers/TradingModeToggle.jsx';
 import { brokersService } from '../services/brokers.service.js';
 
 export function Brokers() {
   const status = useBrokerStore((s) => s.status);
   const fetchStatus = useBrokerStore((s) => s.fetch);
-  const tradingMode = useSettingsStore((s) => s.tradingMode);
-  const fetchSettings = useSettingsStore((s) => s.fetch);
 
   usePolling(fetchStatus, 15000);
-
-  useEffect(() => {
-    fetchSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function refreshAll() {
-    fetchStatus();
-    fetchSettings();
-  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold">Brokers</h1>
-        <p className="text-sm text-muted">Connect a real broker to enable live trading, gated behind a 5-layer safety check.</p>
+        <p className="text-sm text-muted">
+          Connect real broker accounts here. Switching between Paper/Live mode and the live-money safety switches now
+          live on the <Link to="/live-trading" className="text-accent underline">Live Trading page</Link>.
+        </p>
       </div>
-
-      <TradingModeToggle tradingMode={tradingMode} brokerStatus={status} onChanged={refreshAll} />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <BrokerCard
