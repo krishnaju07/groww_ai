@@ -8,13 +8,14 @@
 import { UserSettings } from '../models/UserSettings.js';
 import { Order } from '../models/Order.js';
 import { Trade } from '../models/Trade.js';
-import { Position } from '../models/Position.js';
 import { marketData } from './marketData/index.js';
 import { canTrade } from './risk/riskManager.js';
 import { effectiveMode, assertLiveAllowed } from './brokers/tradingModeService.js';
 import { brokerFor } from './brokers/registry.js';
 import { getSystemConfig } from './config/systemConfig.js';
 import { generateIdempotencyKey } from '../utils/idempotency.js';
+import { applyBuyToPosition, applySellToPosition } from '../utils/positionLedger.js';
+import { getIntradaySessionContext } from '../utils/marketHours.js';
 import { round2 } from '../utils/format.js';
 
 /**
@@ -55,29 +56,32 @@ async function recordLiveFill(userId, brokerName, input, result) {
       aiDecisionId: input.aiDecisionId ?? null,
     });
 
-    const existing = await Position.findOne({ userId, broker: brokerName, symbol: input.symbol });
-    const newQuantity = (existing?.quantity ?? 0) + quantity;
-    const newInvestedAmount = round2((existing?.investedAmount ?? 0) + investmentAmount);
-    await Position.findOneAndUpdate(
-      { userId, broker: brokerName, symbol: input.symbol },
-      {
-        quantity: newQuantity,
-        investedAmount: newInvestedAmount,
-        avgBuyPrice: round2(newInvestedAmount / newQuantity),
-        highestPriceSeen: Math.max(existing?.highestPriceSeen ?? 0, price),
-        stopLoss: input.stopLoss ?? existing?.stopLoss ?? null,
-        target: input.target ?? existing?.target ?? null,
-        $setOnInsert: { openedAt: new Date() },
-      },
-      { upsert: true },
-    );
+    await applyBuyToPosition({
+      userId,
+      broker: brokerName,
+      symbol: input.symbol,
+      quantity,
+      investmentAmount,
+      price,
+      stopLoss: input.stopLoss,
+      target: input.target,
+      aiDecisionId: input.aiDecisionId,
+    });
     return;
   }
 
-  // SELL
-  const position = await Position.findOne({ userId, broker: brokerName, symbol: input.symbol });
+  // SELL — the real broker sell already succeeded before this bookkeeping runs, so a
+  // missing/insufficient local Position record (e.g. an externally-opened position, or
+  // one opened before live-fill recording existed) must not block recording the trade;
+  // fall back to pnl=0 rather than throwing, since we have no cost basis to compute it.
   const proceeds = round2(price * quantity);
-  const costBasis = position ? round2(position.avgBuyPrice * quantity) : proceeds;
+  let costBasis = proceeds;
+  try {
+    ({ costBasis } = await applySellToPosition({ userId, broker: brokerName, symbol: input.symbol, quantity }));
+  } catch (err) {
+    if (err.code !== 'NO_POSITION') throw err;
+    console.warn(`[orderService] recordLiveFill SELL: no tracked ${brokerName} position for ${input.symbol} — recording pnl=0.`);
+  }
   const pnl = round2(proceeds - costBasis);
 
   await Trade.create({
@@ -97,15 +101,6 @@ async function recordLiveFill(userId, brokerName, input, result) {
     aiDecisionId: input.aiDecisionId ?? null,
     closedAt: new Date(),
   });
-
-  if (position) {
-    const remaining = position.quantity - quantity;
-    if (remaining <= 0) {
-      await Position.deleteOne({ _id: position._id });
-    } else {
-      await Position.updateOne({ _id: position._id }, { $inc: { quantity: -quantity, investedAmount: -costBasis } });
-    }
-  }
 }
 
 function codedError(message, code, status = 400) {
@@ -113,6 +108,26 @@ function codedError(message, code, status = 400) {
   e.code = code;
   e.status = status;
   return e;
+}
+
+/**
+ * Wraps Order.create so a genuine duplicate-submit (same userId/symbol/action/quantity
+ * within the same second — see idempotency.js) surfaces as a clean, expected error
+ * instead of a raw MongoDB E11000 bubbling up as a 500.
+ */
+async function createOrder(doc) {
+  try {
+    return await Order.create(doc);
+  } catch (err) {
+    if (err.code === 11000) {
+      throw codedError(
+        'Duplicate order — an identical order (same symbol/action/quantity) was already submitted in the last second.',
+        'DUPLICATE_ORDER',
+        409,
+      );
+    }
+    throw err;
+  }
 }
 
 /**
@@ -132,12 +147,31 @@ export async function placeOrder(userId, input) {
 
   const mode = await effectiveMode(userId, settings);
   const brokerName = mode === 'live' ? settings.activeBroker : 'paper';
+  const systemConfig = await getSystemConfig(userId);
+
+  // This platform's entire premise is intraday-only, no overnight positions. NSE cash
+  // technically stays open until 15:30 IST, but squareOffJob's daily force-close cutoff
+  // is 15:15 — a fresh BUY placed in that trailing 15-minute window (or any time after,
+  // however that happened) would have zero mechanism left to close it same-day. This is
+  // the one gate on the choke point itself, so it applies to every order regardless of
+  // source (manual/automatic/ai) or broker (paper/live) — not just an AI-prompt
+  // suggestion. Respects the same ignoreMarketHours escape hatch as isMarketOpen() so
+  // dev/testing outside market hours still works.
+  if (input.action === 'BUY' && !systemConfig.ignoreMarketHours) {
+    const { sessionPhase } = getIntradaySessionContext();
+    if (sessionPhase === 'after-square-off') {
+      throw codedError(
+        "Today's intraday square-off has already run — no new positions can be opened this late (nothing left to close it same-day).",
+        'INTRADAY_ENTRY_WINDOW_CLOSED',
+        403,
+      );
+    }
+  }
 
   const estimatedPrice = input.price ?? (await marketData.getLTP(input.symbol));
 
   if (mode === 'live') {
     await assertLiveAllowed(userId, brokerName);
-    const systemConfig = await getSystemConfig(userId);
 
     if (source === 'automatic') {
       if (!systemConfig.enableLiveAutoTrading) {
@@ -172,25 +206,31 @@ export async function placeOrder(userId, input) {
   const idempotencyKey = input.idempotencyKey ?? generateIdempotencyKey({ userId, symbol: input.symbol, action: input.action, quantity: input.quantity });
 
   if (!riskResult.allowed) {
-    await Order.create({
-      userId,
-      broker: brokerName,
-      mode,
-      symbol: input.symbol,
-      action: input.action,
-      orderType: input.orderType ?? 'MARKET',
-      quantity: input.quantity,
-      price: input.price ?? null,
-      status: 'REJECTED',
-      idempotencyKey,
-      source,
-      confirmedRealMoney: Boolean(input.confirmRealMoney),
-      rejectReason: riskResult.reason,
-    });
+    try {
+      await createOrder({
+        userId,
+        broker: brokerName,
+        mode,
+        symbol: input.symbol,
+        action: input.action,
+        orderType: input.orderType ?? 'MARKET',
+        quantity: input.quantity,
+        price: input.price ?? null,
+        status: 'REJECTED',
+        idempotencyKey,
+        source,
+        confirmedRealMoney: Boolean(input.confirmRealMoney),
+        rejectReason: riskResult.reason,
+      });
+    } catch (err) {
+      if (err.code !== 'DUPLICATE_ORDER') throw err;
+      // Already logged this exact rejected attempt a moment ago — fine, the risk-blocked
+      // reason below is what the caller actually needs to see either way.
+    }
     throw codedError(riskResult.reason, 'RISK_BLOCKED', 403);
   }
 
-  const orderDoc = await Order.create({
+  const orderDoc = await createOrder({
     userId,
     broker: brokerName,
     mode,

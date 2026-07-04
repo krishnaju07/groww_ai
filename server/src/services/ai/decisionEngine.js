@@ -41,9 +41,15 @@ function sanitizeDecision(raw, providerLabel) {
 }
 
 async function callClaude(symbol, ctx) {
+  // Adaptive-thinking tokens draw from this same max_tokens budget, not a separate
+  // allowance — 1024 was tight enough that non-trivial thinking on a multi-signal
+  // prompt could consume the whole budget before the schema-constrained JSON text
+  // block gets emitted, truncating the response. This fails safe (falls back to
+  // Quant / counts as no-agreement) but was silently weakening the ensemble
+  // "both models must agree" safety net more often than it should.
   const response = await anthropicClient.messages.create({
     model: env.AI_MODEL,
-    max_tokens: 1024,
+    max_tokens: 4096,
     thinking: { type: 'adaptive' },
     output_config: {
       effort: 'medium',

@@ -10,6 +10,7 @@ import { startAutoTradingJob } from './jobs/autoTradingJob.js';
 import { startBrokerHealthJob } from './jobs/brokerHealthJob.js';
 import { startAiScanJob } from './jobs/aiScanJob.js';
 import { startSquareOffJob } from './jobs/squareOffJob.js';
+import { startPositionGuardianJob } from './jobs/positionGuardianJob.js';
 
 async function main() {
   await connectDb();
@@ -30,6 +31,7 @@ async function main() {
   startBrokerHealthJob();
   startAiScanJob();
   startSquareOffJob();
+  startPositionGuardianJob();
 }
 
 main().catch((err) => {

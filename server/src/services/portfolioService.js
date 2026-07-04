@@ -21,10 +21,18 @@ export async function getPortfolio(userId) {
   return getPaperPortfolio(userId);
 }
 
-/** Real holdings + margin pulled live from the active broker. @param {string} userId @param {string} brokerName @returns {Promise<object>} */
+/**
+ * Real open positions + margin pulled live from the active broker. Deliberately
+ * reads getPositions() (today's intraday MIS positions), NOT getHoldings() — every
+ * order this app places uses an intraday product type, so a same-day position would
+ * never show up in "holdings" (that's for settled/delivered demat stock, typically
+ * T+1). Reading holdings here would make today's live trades invisible until
+ * settlement even though they're open right now.
+ * @param {string} userId @param {string} brokerName @returns {Promise<object>}
+ */
 async function getLivePortfolio(userId, brokerName) {
   const broker = brokerFor(brokerName, userId);
-  const [holdings, margin] = await Promise.all([broker.getHoldings(), broker.getMargin()]);
+  const [holdings, margin] = await Promise.all([broker.getPositions(), broker.getMargin()]);
   const symbols = holdings.map((h) => h.symbol);
   const ltps = symbols.length ? await marketData.getLTPBatch(symbols) : {};
 

@@ -90,7 +90,7 @@ export function TradingModeToggle({ tradingMode, brokerStatus, onChanged }) {
       </div>
 
       <p className="mt-4 text-xs text-muted">
-        All five conditions above (plus a per-order REAL MONEY confirmation) must hold before any live order can be placed.
+        All four conditions above, plus a per-order REAL MONEY confirmation, must hold before any live order can be placed.
       </p>
     </Card>
   );

@@ -10,6 +10,7 @@ import { Trade } from '../../models/Trade.js';
 import { User } from '../../models/User.js';
 import { marketData } from '../marketData/index.js';
 import { round2 } from '../../utils/format.js';
+import { applyBuyToPosition, applySellToPosition } from '../../utils/positionLedger.js';
 import { PAPER_SLIPPAGE } from '../../config/constants.js';
 
 function fillPrice(ltp, action) {
@@ -61,41 +62,30 @@ export function createPaperBroker(userId) {
           aiDecisionId: o.aiDecisionId ?? null,
         });
 
-        const existing = await Position.findOne({ userId, broker: 'paper', symbol: o.symbol });
-        const newQuantity = (existing?.quantity ?? 0) + o.quantity;
-        const newInvestedAmount = round2((existing?.investedAmount ?? 0) + investmentAmount);
-        const newAvgBuyPrice = round2(newInvestedAmount / newQuantity);
-        const newHighest = Math.max(existing?.highestPriceSeen ?? 0, price);
-
-        await Position.findOneAndUpdate(
-          { userId, broker: 'paper', symbol: o.symbol },
-          {
-            quantity: newQuantity,
-            investedAmount: newInvestedAmount,
-            avgBuyPrice: newAvgBuyPrice,
-            highestPriceSeen: newHighest,
-            stopLoss: o.stopLoss ?? existing?.stopLoss ?? null,
-            target: o.target ?? existing?.target ?? null,
-            aiDecisionId: o.aiDecisionId ?? existing?.aiDecisionId ?? null,
-            $setOnInsert: { openedAt: new Date() },
-          },
-          { upsert: true, new: true },
-        );
+        await applyBuyToPosition({
+          userId,
+          broker: 'paper',
+          symbol: o.symbol,
+          quantity: o.quantity,
+          investmentAmount,
+          price,
+          stopLoss: o.stopLoss,
+          target: o.target,
+          aiDecisionId: o.aiDecisionId,
+        });
 
         return { brokerOrderId: String(trade._id), status: 'FILLED', filledPrice: price, filledQuantity: o.quantity };
       }
 
       // SELL: close (fully or partially) the existing paper position
-      const position = await Position.findOne({ userId, broker: 'paper', symbol: o.symbol });
-      if (!position || position.quantity < o.quantity) {
-        const e = new Error(`No sufficient paper position in ${o.symbol} to sell.`);
-        e.code = 'NO_POSITION';
-        e.status = 400;
-        throw e;
-      }
+      const { costBasis } = await applySellToPosition({
+        userId,
+        broker: 'paper',
+        symbol: o.symbol,
+        quantity: o.quantity,
+      });
 
       const proceeds = investmentAmount;
-      const costBasis = round2(position.avgBuyPrice * o.quantity);
       const pnl = round2(proceeds - costBasis);
       const pnlPercent = costBasis ? round2((pnl / costBasis) * 100) : 0;
 
@@ -118,16 +108,6 @@ export function createPaperBroker(userId) {
         aiDecisionId: o.aiDecisionId ?? null,
         closedAt: new Date(),
       });
-
-      const remaining = position.quantity - o.quantity;
-      if (remaining <= 0) {
-        await Position.deleteOne({ _id: position._id });
-      } else {
-        await Position.updateOne(
-          { _id: position._id },
-          { $inc: { quantity: -o.quantity, investedAmount: -costBasis } },
-        );
-      }
 
       return { brokerOrderId: String(trade._id), status: 'FILLED', filledPrice: price, filledQuantity: o.quantity };
     },

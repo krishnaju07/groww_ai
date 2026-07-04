@@ -3,6 +3,7 @@ import { rsi, macd, volumeRatio, trend, parabolicSar, supertrend } from '../indi
 import { supportResistance } from './supportResistance.js';
 import { getNiftySentiment } from './niftySentimentService.js';
 import { getSectorContext } from './sectorContext.js';
+import { getIntradaySessionContext } from '../../utils/marketHours.js';
 
 /**
  * Assembles everything the AI decision engine (and the quant scorer) needs for
@@ -43,6 +44,7 @@ export async function buildContext(symbol) {
     trendLongTerm: trend(closes30m),
     psar: parabolicSar(ohlc5m),
     supertrend: supertrend(ohlc5m),
+    ...getIntradaySessionContext(),
     levels: supportResistance(candles5m),
     sector: sectorContext.sector,
     sectorRelativeStrength: sectorContext.relativeStrength,

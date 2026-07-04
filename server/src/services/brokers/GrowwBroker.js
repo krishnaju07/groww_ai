@@ -67,7 +67,13 @@ export function createGrowwBroker() {
       await getAccessToken();
     },
 
-    /** @param {import('../../types.js').PlaceOrderInput} o */
+    /**
+     * Every position through this app is intraday (MIS) — never CNC/delivery. CNC would
+     * leave the position unmanaged by the broker overnight AND untouched by our own
+     * square-off job (which only looks at what we ourselves tracked), i.e. an actual
+     * T+1 delivery holding despite this being an "intraday only" platform.
+     * @param {import('../../types.js').PlaceOrderInput} o
+     */
     async placeOrder(o) {
       const payload = await request('/order/create', {
         method: 'POST',
@@ -78,13 +84,24 @@ export function createGrowwBroker() {
           quantity: o.quantity,
           transaction_type: o.action,
           order_type: o.orderType === 'LIMIT' ? GROWW_ORDER.ORDER_TYPE_LIMIT : GROWW_ORDER.ORDER_TYPE_MARKET,
-          product: GROWW_ORDER.PRODUCT_CNC,
+          product: GROWW_ORDER.PRODUCT_MIS,
           validity: GROWW_ORDER.VALIDITY_DAY,
           price: o.orderType === 'LIMIT' ? o.price : 0,
           order_reference_id: `growwai-${Date.now()}`,
         },
       });
-      return { brokerOrderId: payload.groww_order_id, status: mapStatus(payload.order_status) };
+
+      // MARKET orders on NSE cash equity fill near-instantly — check right away so
+      // recordLiveFill (orderService.js) actually gets a filledPrice/filledQuantity
+      // instead of always silently no-op'ing. If it's not reflected yet, we still return
+      // whatever status we have; the caller already tolerates a non-FILLED result.
+      const brokerOrderId = payload.groww_order_id;
+      try {
+        const detail = await this.getOrderStatus(brokerOrderId);
+        return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
+      } catch {
+        return { brokerOrderId, status: mapStatus(payload.order_status) };
+      }
     },
 
     async modifyOrder(orderId, patch) {

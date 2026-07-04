@@ -1,14 +1,26 @@
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useBrokerStore } from '../store/useBrokerStore.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { BrokerCard } from '../components/brokers/BrokerCard.jsx';
 import { brokersService } from '../services/brokers.service.js';
+import { toast } from '../store/useToastStore.js';
 
 export function Brokers() {
   const status = useBrokerStore((s) => s.status);
   const fetchStatus = useBrokerStore((s) => s.fetch);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   usePolling(fetchStatus, 15000);
+
+  useEffect(() => {
+    if (searchParams.get('zerodha') === 'connected') {
+      toast.success('Zerodha connected');
+      fetchStatus();
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   return (
     <div className="space-y-6">

@@ -34,7 +34,13 @@ export function createAngelOneBroker(userId) {
       await getAngelOneClient(userId);
     },
 
-    /** @param {import('../../types.js').PlaceOrderInput} o */
+    /**
+     * Every position through this app is intraday (INTRADAY/MIS-equivalent) — never
+     * DELIVERY. DELIVERY would leave the position unmanaged by the broker overnight AND
+     * untouched by our own square-off job, i.e. an actual T+1 holding despite this being
+     * an "intraday only" platform.
+     * @param {import('../../types.js').PlaceOrderInput} o
+     */
     async placeOrder(o) {
       const client = await getAngelOneClient(userId);
       const token = await resolveSymbolToken(o.symbol);
@@ -45,7 +51,7 @@ export function createAngelOneBroker(userId) {
         transactiontype: o.action,
         exchange: 'NSE',
         ordertype: o.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
-        producttype: 'DELIVERY',
+        producttype: 'INTRADAY',
         duration: 'DAY',
         price: o.orderType === 'LIMIT' ? String(o.price) : '0',
         squareoff: '0',
@@ -53,7 +59,18 @@ export function createAngelOneBroker(userId) {
         quantity: String(o.quantity),
       });
       if (!res?.status) throw brokerError(res, 'placeOrder');
-      return { brokerOrderId: res.data.orderid, status: 'PLACED' };
+      const brokerOrderId = res.data.orderid;
+
+      // MARKET orders on NSE cash equity fill near-instantly — check right away so
+      // recordLiveFill (orderService.js) actually gets a filledPrice/filledQuantity
+      // instead of always hardcoding PLACED. If it's not reflected yet, we still return
+      // whatever we have; the caller already tolerates a non-FILLED result.
+      try {
+        const detail = await this.getOrderStatus(brokerOrderId);
+        return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
+      } catch {
+        return { brokerOrderId, status: 'PLACED' };
+      }
     },
 
     async modifyOrder(orderId, patch) {
