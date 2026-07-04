@@ -22,12 +22,21 @@ const CANDLE_TTL_MS = 15_000;
 const ltpCache = new Map(); // symbol -> {value, at}
 const candleCache = new Map(); // `${symbol}:${interval}:${limit}` -> {value, at}
 
+// Tracks the last time the configured (non-mock) provider actually failed and got
+// silently swapped for fake data — this is what powers the "market data degraded"
+// warning banner. Without this, a provider outage (e.g. an API losing access, rate
+// limits, a revoked add-on) is invisible: prices/candles keep flowing, just fake,
+// and every downstream AI decision/risk calc quietly runs on fiction.
+let fallbackState = { provider: null, at: 0, reason: '' };
+const FALLBACK_STALE_MS = 30_000; // how long a fallback keeps the banner showing after the last occurrence
+
 async function withFallback(primary, fn, fallbackFn, label) {
   try {
     return await fn();
   } catch (err) {
     if (primary !== MockProvider) {
       console.warn(`[marketData] ${primary.name} failed for ${label}, falling back to mock: ${err.message}`);
+      fallbackState = { provider: primary.name, at: Date.now(), reason: err.message };
     }
     return fallbackFn();
   }
@@ -37,6 +46,16 @@ export const marketData = {
   /** @returns {Promise<string>} the currently configured provider's name */
   async getProviderName() {
     return (await getPrimary()).name;
+  },
+
+  /** @returns {Promise<{provider:string, degraded:boolean, lastFallbackReason:string|null}>} whether the real provider has recently failed and silently served mock data instead */
+  async getStatus() {
+    const primary = await getPrimary();
+    const degraded =
+      primary !== MockProvider &&
+      fallbackState.provider === primary.name &&
+      Date.now() - fallbackState.at < FALLBACK_STALE_MS;
+    return { provider: primary.name, degraded, lastFallbackReason: degraded ? fallbackState.reason : null };
   },
 
   /** @param {string} symbol @returns {Promise<number>} */
