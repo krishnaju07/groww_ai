@@ -10,6 +10,37 @@ import { formatDateTime, formatPercent, formatINR } from '../lib/format.js';
 
 const TONE = { BUY: 'accent', SELL: 'danger', WAIT: 'default' };
 const FILTERS = ['ALL', 'BUY', 'SELL', 'WAIT'];
+const SCORE_LABELS = {
+  trendConfluence: 'Trend confluence',
+  momentum: 'Momentum',
+  volumeConviction: 'Volume conviction',
+  newsSentiment: 'News sentiment',
+  trackRecord: 'Track record',
+};
+
+function ScoreBreakdown({ scores }) {
+  if (!scores) return null;
+  return (
+    <div className="space-y-1.5 rounded-xl border border-border/60 bg-bg/30 p-3 text-xs">
+      {Object.entries(SCORE_LABELS).map(([key, label]) => {
+        const value = scores[key];
+        if (value == null) return null;
+        return (
+          <div key={key} className="flex items-center gap-2">
+            <span className="w-32 shrink-0 text-muted">{label}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border/40">
+              <div
+                className={`h-full rounded-full ${value >= 65 ? 'bg-accent' : value <= 35 ? 'bg-danger' : 'bg-muted'}`}
+                style={{ width: `${value}%` }}
+              />
+            </div>
+            <span className="w-8 shrink-0 text-right font-medium">{value}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function AIDecisions() {
   const decisions = useAIStore((s) => s.decisions);
@@ -100,7 +131,9 @@ export function AIDecisions() {
                 </div>
               </button>
               {expanded === d._id && (
-                <div className="mt-2">
+                <div className="mt-2 space-y-3">
+                  {d.justification && <p className="text-sm text-muted">{d.justification}</p>}
+                  <ScoreBreakdown scores={d.scoreBreakdown} />
                   <IndicatorBreakdown snapshot={d.indicatorsSnapshot} />
                 </div>
               )}

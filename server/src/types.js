@@ -58,13 +58,24 @@
  */
 
 /**
+ * @typedef {Object} ScoreBreakdown
+ * @property {number} trendConfluence   0-100 — agreement across the 5m/15m/30m timeframes
+ * @property {number} momentum          0-100 — RSI/MACD exhaustion vs room-to-run
+ * @property {number} volumeConviction  0-100 — volume support for the move
+ * @property {number} newsSentiment     0-100 — today's headlines, 50 = neutral/no news
+ * @property {number} trackRecord       0-100 — this symbol's own past AI-decision win rate, 50 = no history yet
+ */
+
+/**
  * @typedef {Object} AiDecision
  * @property {AiAction} action
  * @property {number} quantity
  * @property {number} stopLoss
  * @property {number} target
- * @property {string} reason
- * @property {number} confidence   0-100
+ * @property {string} reason          one-sentence summary (used as Order/Trade triggerReason — keep short)
+ * @property {number} confidence      0-100, overall
+ * @property {string} [justification] 2-4 sentence detailed reasoning covering technicals, news, and track record
+ * @property {ScoreBreakdown} [scoreBreakdown]
  */
 
 /**
@@ -84,6 +95,8 @@
  * @property {string} sector
  * @property {number} sectorRelativeStrength this stock's day momentum minus its sector peers' average, in percent
  * @property {string} niftySentiment
+ * @property {string[]} news up to 5 recent headlines (stock-specific + broad market), newest first
+ * @property {{totalClosed:number, winRate:number|null, avgPnl:number|null}} trackRecord this symbol's own past AI-triggered trade performance
  */
 
 /**

@@ -20,6 +20,13 @@ import { round2 } from '../../utils/format.js';
 const anthropicClient = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
 const openaiClient = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
 
+const SCORE_KEYS = ['trendConfluence', 'momentum', 'volumeConviction', 'newsSentiment', 'trackRecord'];
+
+/** @param {number} n @returns {number} clamped to a 0-100 integer, defaulting to neutral (50) if not a finite number */
+function clampScore(n) {
+  return Number.isFinite(Number(n)) ? Math.max(0, Math.min(100, Math.round(Number(n)))) : 50;
+}
+
 function sanitizeDecision(raw, providerLabel) {
   if (!raw || !['BUY', 'SELL', 'WAIT'].includes(raw.action)) {
     throw new Error(`${providerLabel} response missing a valid action`);
@@ -30,6 +37,10 @@ function sanitizeDecision(raw, providerLabel) {
   if (raw.action !== 'WAIT' && (!Number.isFinite(stopLoss) || !Number.isFinite(target) || stopLoss <= 0 || target <= 0)) {
     throw new Error(`${providerLabel} response has invalid stopLoss/target for a BUY/SELL`);
   }
+  const scoreBreakdown = SCORE_KEYS.reduce((acc, key) => {
+    acc[key] = clampScore(raw.scoreBreakdown?.[key]);
+    return acc;
+  }, {});
   return {
     action: raw.action,
     quantity,
@@ -37,6 +48,8 @@ function sanitizeDecision(raw, providerLabel) {
     target: Number.isFinite(target) ? round2(target) : 0,
     reason: String(raw.reason ?? '').slice(0, 500),
     confidence: Math.max(0, Math.min(100, Math.round(Number(raw.confidence) || 0))),
+    justification: String(raw.justification ?? '').slice(0, 1000),
+    scoreBreakdown,
   };
 }
 
@@ -122,7 +135,7 @@ export async function callProvider(providerKey, symbol, ctx) {
  * @returns {Promise<import('../../types.js').AiDecision & {decisionId: string, models: object[]}>}
  */
 export async function decide(userId, symbol) {
-  const ctx = await buildContext(symbol);
+  const ctx = await buildContext(symbol, userId);
   const quant = scoreQuant(symbol, ctx);
 
   const settings = await UserSettings.findOne({ userId }).lean();
@@ -153,6 +166,11 @@ export async function decide(userId, symbol) {
     target: primary.target || null,
     reason: primary.reason,
     confidence: primary.confidence,
+    // Only the LLM path produces these (the Quant cross-check is a cheap deterministic
+    // scorer with no news/track-record input) — absent whenever quant is the primary,
+    // e.g. the LLM call failed and this fell back.
+    justification: primary.justification ?? '',
+    scoreBreakdown: primary.scoreBreakdown ?? undefined,
     models,
     indicatorsSnapshot: ctx,
   });

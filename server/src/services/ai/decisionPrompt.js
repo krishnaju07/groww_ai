@@ -9,8 +9,21 @@ export const DECISION_SCHEMA = {
     target: { type: 'number' },
     reason: { type: 'string' },
     confidence: { type: 'integer' },
+    justification: { type: 'string' },
+    scoreBreakdown: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        trendConfluence: { type: 'integer' },
+        momentum: { type: 'integer' },
+        volumeConviction: { type: 'integer' },
+        newsSentiment: { type: 'integer' },
+        trackRecord: { type: 'integer' },
+      },
+      required: ['trendConfluence', 'momentum', 'volumeConviction', 'newsSentiment', 'trackRecord'],
+    },
   },
-  required: ['action', 'quantity', 'stopLoss', 'target', 'reason', 'confidence'],
+  required: ['action', 'quantity', 'stopLoss', 'target', 'reason', 'confidence', 'justification', 'scoreBreakdown'],
 };
 
 export function buildSystemPrompt() {
@@ -62,20 +75,60 @@ export function buildSystemPrompt() {
     '  a stock bucking its own sector\'s trend is a lower-conviction, more idiosyncratic (riskier) setup.',
     '- Nifty sentiment is the broad-market backdrop — a trade fighting the index trend needs materially',
     '  stronger stock-specific confirmation to justify the same confidence.',
+    '- News headlines are today\'s real-world context — read them yourself and judge relevance/impact; do not',
+    '  assume they are pre-scored. A stock-specific headline about earnings, regulatory action, a large order',
+    '  win/loss, or management change can override what pure technicals suggest — technicals describe the past',
+    '  few candles, news can describe something about to move the stock that hasn\'t shown up in price yet. If',
+    '  the headlines are stale, generic, or irrelevant to today, say so and weight them neutrally — do not force',
+    '  a sentiment read out of noise.',
+    '- Track record is this specific symbol\'s own history of past AI-triggered trades (win rate, avg P&L) — a',
+    '  symbol where recent calls have gone poorly deserves more skepticism/a higher confluence bar than one with',
+    '  a strong track record, even given an identical indicator snapshot today. Fewer than ~5 closed trades is',
+    '  not enough sample to mean much either way — treat it as neutral until there is real history.',
     '',
     'Given the indicator snapshot for one symbol, decide BUY, SELL, or WAIT.',
     'quantity is your suggested share count assuming a moderate ~₹5000 position for a BUY/SELL (0 for WAIT).',
     'stopLoss and target are absolute prices, sized so the reward is at least ~2x the risk given today\'s',
-    'remaining time to intraday square-off. reason is one concise sentence naming the specific signals that',
-    'drove the call — timeframe confluence (or lack of it) first, then whichever of RSI/MACD/volume/SAR/',
-    'Supertrend/sector/Nifty sentiment mattered most. confidence is 0-100 and must reflect actual signal',
-    'strength and agreement:',
-    'roughly 80-100 only for full 3-timeframe confluence plus volume confirmation, 50-79 for partial',
-    'agreement, below 50 should almost always resolve to WAIT rather than a low-conviction BUY/SELL.',
+    'remaining time to intraday square-off. reason is one concise sentence (used verbatim as the order\'s audit-',
+    'trail label — keep it short) naming the single strongest driver of the call.',
+    '',
+    'justification is 2-4 sentences: the full reasoning chain a careful analyst would write — which signals',
+    'agreed, which disagreed and why they were outweighed, what the news and track record added or subtracted,',
+    'and specifically why the risk:reward and remaining intraday runway justify (or don\'t justify) acting now.',
+    'Write it so someone auditing this decision later can see exactly why it was made, not just what was decided.',
+    '',
+    'scoreBreakdown gives your reasoning an auditable structure — five independent 0-100 sub-scores (0 = strong',
+    'evidence against, 50 = neutral/no signal, 100 = strong evidence for the direction you chose, or for WAIT,',
+    'how strongly each factor argues for staying out):',
+    '  trendConfluence   — agreement across the 5m/15m/30m trend reads, SAR, and Supertrend',
+    '  momentum          — RSI/MACD: is there room left to run, or is the move exhausted',
+    '  volumeConviction  — is volume confirming or contradicting the move',
+    '  newsSentiment      — today\'s headlines\' relevance and directional read (50 if no relevant news)',
+    '  trackRecord        — this symbol\'s own historical AI-decision performance (50 if insufficient history)',
+    'confidence is 0-100 overall and should be consistent with these sub-scores (roughly their weighted',
+    'average, trendConfluence/momentum/volumeConviction weighted heaviest since they are the most reliable',
+    'same-day signals) — not a separately-invented number. It must reflect actual signal strength and',
+    'agreement: roughly 80-100 only for full 3-timeframe confluence plus volume confirmation (and no',
+    'contradicting news), 50-79 for partial agreement, below 50 should almost always resolve to WAIT rather',
+    'than a low-conviction BUY/SELL.',
+    '',
+    'Remember what this account is actually optimizing for: small, steady, compounding daily gains with rare,',
+    'small, capped losses — not the impossible goal of never losing. No real strategy avoids every loss; one',
+    'that tried to would either lie about it or trade so rarely it never compounds either. Your honest job is',
+    'to keep the win-rate high and every loss small and expected, by only acting on genuine multi-signal',
+    'agreement and sizing stops sensibly — not to pretend a losing trade can never happen.',
   ].join('\n');
 }
 
 export function buildUserContent(symbol, ctx) {
+  const newsBlock = ctx.news?.length ? ctx.news.map((h) => `  - ${h}`).join('\n') : '  - No recent headlines found.';
+
+  const tr = ctx.trackRecord;
+  const trackRecordLine =
+    tr && tr.totalClosed > 0
+      ? `This symbol's AI-decision track record: ${tr.totalClosed} closed trade(s), ${tr.winRate}% win rate, avg P&L ₹${tr.avgPnl}/trade.`
+      : "This symbol's AI-decision track record: no closed trades yet — treat trackRecord as neutral (50).";
+
   return [
     `Symbol: ${symbol}`,
     `Current Price (LTP): ₹${ctx.ltp}`,
@@ -88,6 +141,11 @@ export function buildUserContent(symbol, ctx) {
     `Support: ₹${ctx.levels.support} | Resistance: ₹${ctx.levels.resistance}`,
     `Sector: ${ctx.sector} | Relative strength vs sector peers: ${ctx.sectorRelativeStrength > 0 ? '+' : ''}${ctx.sectorRelativeStrength}%`,
     ctx.niftySentiment,
+    '',
+    "Today's news headlines (stock-specific + broad market, judge relevance/impact yourself):",
+    newsBlock,
+    '',
+    trackRecordLine,
     '',
     'Decision: BUY, SELL, or WAIT? Remember: this must close before today\'s 15:15 IST square-off, and WAIT is',
     'the correct answer whenever the three timeframes don\'t genuinely agree, or there isn\'t enough runway left.',

@@ -51,6 +51,8 @@ async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx) {
       ? `Ensemble ${agreed ? 'agreed' : 'disagreed'}: Quant=${quantDecision.action} (${quantDecision.reason}); ${llm.providerLabel}=${llm.action} (${llm.reason})`
       : `LLM confirmation unavailable (${llmError}) — trade skipped, confirmation was required.`,
     confidence: agreed ? Math.round((quantDecision.confidence + llm.confidence) / 2) : 0,
+    justification: llm?.justification ?? '',
+    scoreBreakdown: llm?.scoreBreakdown ?? undefined,
     models: [
       { name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence },
       ...(llm ? [{ name: llm.providerLabel, action: llm.action, confidence: llm.confidence }] : []),
@@ -86,7 +88,7 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
 
   for (const { symbol } of STOCK_UNIVERSE) {
     try {
-      const ctx = await buildContext(symbol);
+      const ctx = await buildContext(symbol, userId);
       const quantDecision = scoreQuant(symbol, ctx, settings.autoInvest.amountPerTrade);
 
       if (quantDecision.action === 'WAIT') continue;
