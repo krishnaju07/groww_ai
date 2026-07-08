@@ -9,6 +9,7 @@ import { settingsRoutes } from './settings.routes.js';
 import { riskRoutes } from './risk.routes.js';
 import { aiRoutes } from './ai.routes.js';
 import { brokersRoutes } from './brokers.routes.js';
+import { backtestRoutes } from './backtest.routes.js';
 
 export const apiRoutes = Router();
 
@@ -22,3 +23,4 @@ apiRoutes.use('/settings', settingsRoutes);
 apiRoutes.use('/risk', riskRoutes);
 apiRoutes.use('/ai', aiRoutes);
 apiRoutes.use('/brokers', brokersRoutes);
+apiRoutes.use('/backtest', backtestRoutes);

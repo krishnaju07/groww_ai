@@ -4,7 +4,8 @@ import { UserSettings } from '../models/UserSettings.js';
 import { Position } from '../models/Position.js';
 import { marketData } from '../services/marketData/index.js';
 import { effectiveMode } from '../services/brokers/tradingModeService.js';
-import { placeOrder } from '../services/orderService.js';
+import { brokerFor } from '../services/brokers/registry.js';
+import { placeOrder, recordLiveFill } from '../services/orderService.js';
 import { isMarketOpen } from '../utils/marketHours.js';
 import { round2, applyPercent } from '../utils/format.js';
 
@@ -30,6 +31,7 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
 
   const mode = await effectiveMode(userId, settings);
   const brokerName = mode === 'live' ? settings.activeBroker : 'paper';
+  const broker = mode === 'live' ? brokerFor(brokerName, userId) : null;
   const positions = await Position.find({ userId, broker: brokerName });
   if (!positions.length) return { ran: true, results: [] };
 
@@ -47,6 +49,32 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
 
   for (const position of positions) {
     try {
+      // Broker-side OCO/GTT reconciliation: if the protective order already executed at
+      // the broker before this tick got to it (server was down, or the broker's own
+      // trigger beat our 15s poll), detect it here and record the fill — never place a
+      // second, redundant SELL against a position Groww already closed on its own side.
+      if (position.smartOrderId && broker && typeof broker.getSmartOrderStatus === 'function') {
+        const smartStatus = await broker.getSmartOrderStatus(position.smartOrderId, position.smartOrderType).catch((err) => {
+          console.error(`[positionGuardianJob] getSmartOrderStatus failed for ${position.symbol}:`, err.message);
+          return null;
+        });
+        if (smartStatus?.status === 'COMPLETED') {
+          const ltpAtDetection = ltps[position.symbol];
+          // The status payload doesn't expose the actual exit fill price — approximate
+          // with current LTP (falls back to cost basis if a quote isn't available this
+          // tick), same approximation orderReconciliationJob accepts elsewhere.
+          const approxFillPrice = Number.isFinite(ltpAtDetection) ? ltpAtDetection : position.avgBuyPrice;
+          const tradeId = await recordLiveFill(
+            userId,
+            brokerName,
+            { symbol: position.symbol, action: 'SELL', quantity: position.quantity, source: 'automatic', triggerReason: 'Broker-side stop-loss/target (OCO) executed' },
+            { status: 'FILLED', filledPrice: approxFillPrice, filledQuantity: position.quantity },
+          );
+          results.push({ symbol: position.symbol, status: 'CLOSED_BY_BROKER_OCO', tradeId: tradeId ? String(tradeId) : null });
+          continue;
+        }
+      }
+
       const ltp = ltps[position.symbol];
       if (!Number.isFinite(ltp)) continue;
 

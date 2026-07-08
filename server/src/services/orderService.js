@@ -8,6 +8,7 @@
 import { UserSettings } from '../models/UserSettings.js';
 import { Order } from '../models/Order.js';
 import { Trade } from '../models/Trade.js';
+import { Position } from '../models/Position.js';
 import { marketData } from './marketData/index.js';
 import { canTrade } from './risk/riskManager.js';
 import { effectiveMode, assertLiveAllowed } from './brokers/tradingModeService.js';
@@ -111,6 +112,51 @@ export async function recordLiveFill(userId, brokerName, input, result) {
     closedAt: new Date(),
   });
   return trade._id;
+}
+
+/**
+ * After a live BUY fill, places a broker-side protective OCO (target+stop-loss) as a safety
+ * net alongside positionGuardianJob's own 15s polling — the broker enforces the exit even
+ * if this server is down or slow. Only Groww implements this (feature-detected via
+ * `placeProtectiveOco`), and only fires when the position doesn't already carry one — a
+ * position built from several same-day BUYs only gets protected at first-entry quantity,
+ * a known MVP limitation. A failure here never fails the trade itself: the fill already
+ * happened either way, and positionGuardianJob remains the primary enforcement mechanism.
+ * @param {string} userId @param {string} brokerName @param {import('../types.js').BrokerAdapter} broker @param {string} symbol
+ */
+async function attachProtectiveOco(userId, brokerName, broker, symbol) {
+  if (typeof broker.placeProtectiveOco !== 'function') return;
+  const position = await Position.findOne({ userId, broker: brokerName, symbol });
+  if (!position || position.smartOrderId || !position.stopLoss || !position.target) return;
+  try {
+    const smartOrder = await broker.placeProtectiveOco({
+      symbol,
+      quantity: position.quantity,
+      stopLoss: position.stopLoss,
+      target: position.target,
+    });
+    position.smartOrderId = smartOrder.smartOrderId;
+    position.smartOrderType = smartOrder.smartOrderType ?? 'OCO';
+    await position.save();
+  } catch (err) {
+    console.error(`[orderService] failed to place protective OCO for ${symbol}:`, err.message);
+  }
+}
+
+/**
+ * Cancels a still-active broker-side OCO tied to a position that's being (or was just)
+ * sold down — without this, a stale trigger could still fire against shares we no longer
+ * (fully) hold. `smartOrderId` must be captured by the caller BEFORE the sell mutates/
+ * deletes the Position doc (positionLedger deletes it once quantity hits 0).
+ * @param {import('../types.js').BrokerAdapter} broker @param {string|null} smartOrderId @param {string|null} smartOrderType @param {string} symbol
+ */
+async function releaseProtectiveOco(broker, smartOrderId, smartOrderType, symbol) {
+  if (!smartOrderId || typeof broker.cancelSmartOrder !== 'function') return;
+  try {
+    await broker.cancelSmartOrder(smartOrderId, smartOrderType);
+  } catch (err) {
+    console.error(`[orderService] failed to cancel protective OCO ${smartOrderId} for ${symbol}:`, err.message);
+  }
 }
 
 function codedError(message, code, status = 400) {
@@ -257,6 +303,16 @@ export async function placeOrder(userId, input) {
 
   try {
     const broker = brokerFor(brokerName, userId);
+
+    // Snapshot any existing protective OCO BEFORE the sell fires — recordLiveFill's
+    // position bookkeeping below deletes the Position doc once quantity hits 0, so this
+    // is the last point smartOrderId is readable for a full close.
+    let preSellSmartOrder = null;
+    if (mode === 'live' && input.action === 'SELL') {
+      const existing = await Position.findOne({ userId, broker: brokerName, symbol: input.symbol }).lean();
+      if (existing?.smartOrderId) preSellSmartOrder = { id: existing.smartOrderId, type: existing.smartOrderType };
+    }
+
     const result = await broker.placeOrder({
       symbol: input.symbol,
       action: input.action,
@@ -285,6 +341,12 @@ export async function placeOrder(userId, input) {
         // — the getOrderStatus race the broker adapters retry internally, but can still
         // miss), tradeId stays null and orderReconciliationJob.js picks this order up on
         // its next pass to re-check and backfill the fill once it actually lands.
+
+        if (input.action === 'BUY') {
+          await attachProtectiveOco(userId, brokerName, broker, input.symbol);
+        } else if (preSellSmartOrder) {
+          await releaseProtectiveOco(broker, preSellSmartOrder.id, preSellSmartOrder.type, input.symbol);
+        }
       } catch (err) {
         // Never let bookkeeping failure hide a real broker fill from the caller —
         // the order already went through; log loudly and move on. Reconciliation will

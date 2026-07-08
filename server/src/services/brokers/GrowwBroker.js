@@ -55,10 +55,14 @@ export function createGrowwBroker() {
   return {
     name: 'groww',
 
+    /**
+     * A minted token proves auth works but not that the account can actually trade —
+     * /user/detail is the real capability check (NSE cash access + segment enabled).
+     */
     async isConnected() {
       try {
-        await getAccessToken();
-        return true;
+        const detail = await this.getUserDetail();
+        return Boolean(detail?.nseEnabled && detail?.activeSegments?.includes(GROWW_ORDER.SEGMENT_CASH));
       } catch {
         return false;
       }
@@ -66,6 +70,53 @@ export function createGrowwBroker() {
 
     async connect() {
       await getAccessToken();
+    },
+
+    /** @returns {Promise<{vendorUserId:string, ucc:string, nseEnabled:boolean, bseEnabled:boolean, ddpiEnabled:boolean, activeSegments:string[]}>} */
+    async getUserDetail() {
+      const payload = await request('/user/detail');
+      return {
+        vendorUserId: payload.vendor_user_id,
+        ucc: payload.ucc,
+        nseEnabled: Boolean(payload.nse_enabled),
+        bseEnabled: Boolean(payload.bse_enabled),
+        ddpiEnabled: Boolean(payload.ddpi_enabled),
+        activeSegments: payload.active_segments ?? [],
+      };
+    },
+
+    /**
+     * Pre-trade margin check (POST /margins/detail/orders) — called from placeOrder() before
+     * /order/create so an insufficient-margin order fails fast with a clear message instead
+     * of a generic broker rejection. Fails OPEN (returns null, doesn't block the order) if the
+     * check call itself errors — a margin-check outage must never be what stops a real trade;
+     * /order/create's own rejection is still there as the ultimate authority either way.
+     * @param {import('../../types.js').PlaceOrderInput} o
+     * @returns {Promise<{totalRequirement:number}|null>}
+     */
+    async checkOrderMargin(o) {
+      try {
+        const payload = await request('/margins/detail/orders', {
+          method: 'POST',
+          query: { segment: GROWW_ORDER.SEGMENT_CASH },
+          body: [
+            {
+              trading_symbol: toGrowwTradingSymbol(o.symbol),
+              exchange: GROWW_ORDER.EXCHANGE_NSE,
+              segment: GROWW_ORDER.SEGMENT_CASH,
+              transaction_type: o.action,
+              quantity: o.quantity,
+              product: GROWW_ORDER.PRODUCT_MIS,
+              order_type: o.orderType === 'LIMIT' ? GROWW_ORDER.ORDER_TYPE_LIMIT : GROWW_ORDER.ORDER_TYPE_MARKET,
+              ...(o.orderType === 'LIMIT' ? { price: o.price } : {}),
+            },
+          ],
+        });
+        return { totalRequirement: Number(payload?.total_requirement) || 0 };
+      } catch (err) {
+        console.error(`[GrowwBroker] checkOrderMargin failed for ${o.symbol}, skipping pre-flight check:`, err.message);
+        return null;
+      }
     },
 
     /**
@@ -76,6 +127,28 @@ export function createGrowwBroker() {
      * @param {import('../../types.js').PlaceOrderInput} o
      */
     async placeOrder(o) {
+      if (o.action === GROWW_ORDER.TRANSACTION_BUY) {
+        const margin = await this.checkOrderMargin(o);
+        if (margin) {
+          // Same fail-open principle as checkOrderMargin itself — an available-margin
+          // lookup failure here must not be what blocks a real trade; only an actual,
+          // confirmed insufficient-margin result should.
+          try {
+            const { available } = await this.getMargin();
+            if (margin.totalRequirement > available) {
+              const err = new Error(
+                `Insufficient margin: order needs ₹${margin.totalRequirement.toFixed(2)}, only ₹${available.toFixed(2)} available.`,
+              );
+              err.code = 'BROKER_ERROR';
+              throw err;
+            }
+          } catch (err) {
+            if (err.code === 'BROKER_ERROR' && err.message.startsWith('Insufficient margin')) throw err;
+            console.error(`[GrowwBroker] getMargin failed during pre-flight check for ${o.symbol}, skipping:`, err.message);
+          }
+        }
+      }
+
       const payload = await request('/order/create', {
         method: 'POST',
         body: {
@@ -151,6 +224,31 @@ export function createGrowwBroker() {
       }));
     },
 
+    /** @param {string} orderId @returns {Promise<object[]>} individual fill/execution records for an order (handles partial fills across multiple trades). */
+    async getOrderTrades(orderId) {
+      const payload = await request(`/order/trades/${orderId}`, { query: { segment: GROWW_ORDER.SEGMENT_CASH } });
+      const trades = payload?.trade_list ?? [];
+      return trades.map((t) => ({
+        tradeId: t.groww_trade_id,
+        price: t.price,
+        quantity: t.quantity,
+        tradedAt: t.trade_date_time ? new Date(t.trade_date_time) : null,
+      }));
+    },
+
+    /** @param {string} referenceId our own `order_reference_id` passed at creation time @returns {Promise<OrderResult>} */
+    async getOrderStatusByReference(referenceId) {
+      const payload = await request(`/order/status/reference/${referenceId}`, {
+        query: { segment: GROWW_ORDER.SEGMENT_CASH },
+      });
+      return {
+        brokerOrderId: payload.groww_order_id,
+        status: mapStatus(payload.order_status),
+        filledPrice: payload.average_fill_price,
+        filledQuantity: payload.filled_quantity,
+      };
+    },
+
     async getLTP(symbol) {
       const payload = await request('/live-data/quote', {
         query: { exchange: GROWW_ORDER.EXCHANGE_NSE, segment: GROWW_ORDER.SEGMENT_CASH, trading_symbol: symbol },
@@ -190,9 +288,89 @@ export function createGrowwBroker() {
       }));
     },
 
+    /** @param {string} symbol @returns {Promise<Holding|null>} single-symbol position lookup, cheaper than getPositions() when only one symbol is needed. */
+    async getPositionBySymbol(symbol) {
+      const payload = await request('/positions/trading-symbol', {
+        query: { segment: GROWW_ORDER.SEGMENT_CASH, exchange: GROWW_ORDER.EXCHANGE_NSE, trading_symbol: toGrowwTradingSymbol(symbol) },
+      });
+      if (!payload) return null;
+      return { symbol, quantity: payload.quantity, avgPrice: payload.net_price, ltp: 0 };
+    },
+
     async getMargin() {
       const payload = await request('/margins/detail/user');
       return { available: payload?.clear_cash ?? 0, used: payload?.net_margin_used ?? 0 };
+    },
+
+    // --- Smart Orders (GTT/OCO) — /order-advance/* — a broker-side stop-loss/target safety
+    // net placed alongside positionGuardianJob's own 15s polling (see orderService.js's
+    // BUY/SELL live-fill handling and positionGuardianJob.js's reconciliation check). Only
+    // Groww implements these on the BrokerAdapter — callers must feature-detect
+    // (`typeof broker.placeProtectiveOco === 'function'`) before calling.
+
+    /**
+     * Places a one-cancels-other exit order: a LIMIT SELL at `target` and an SL_M
+     * (stop-loss market) SELL at `stopLoss`, whichever triggers first cancels the other.
+     * Always a SELL — this platform never opens a short position, SELL only ever closes an
+     * existing long (see autoTradingService.js), so the protective leg is always an exit.
+     * @param {{symbol:string, quantity:number, stopLoss:number, target:number}} o
+     * @returns {Promise<{smartOrderId:string, smartOrderType:string, status:string}>}
+     */
+    async placeProtectiveOco(o) {
+      const payload = await request('/order-advance/create', {
+        method: 'POST',
+        body: {
+          reference_id: `growwai-oco-${Date.now()}`,
+          smart_order_type: GROWW_ORDER.SMART_ORDER_TYPE_OCO,
+          segment: GROWW_ORDER.SEGMENT_CASH,
+          exchange: GROWW_ORDER.EXCHANGE_NSE,
+          trading_symbol: toGrowwTradingSymbol(o.symbol),
+          quantity: o.quantity,
+          net_position_quantity: o.quantity,
+          transaction_type: GROWW_ORDER.TRANSACTION_SELL,
+          target: { trigger_price: String(o.target), order_type: GROWW_ORDER.ORDER_TYPE_LIMIT, price: String(o.target) },
+          stop_loss: { trigger_price: String(o.stopLoss), order_type: GROWW_ORDER.ORDER_TYPE_SL_M, price: null },
+          product_type: GROWW_ORDER.PRODUCT_MIS,
+          duration: GROWW_ORDER.VALIDITY_DAY,
+        },
+      });
+      return { smartOrderId: payload.smart_order_id, smartOrderType: payload.smart_order_type, status: payload.status };
+    },
+
+    /**
+     * @param {string} smartOrderId @param {string} [smartOrderType] @param {string} [segment]
+     * @returns {Promise<{smartOrderId:string, status:string}>}
+     */
+    async cancelSmartOrder(smartOrderId, smartOrderType = GROWW_ORDER.SMART_ORDER_TYPE_OCO, segment = GROWW_ORDER.SEGMENT_CASH) {
+      const payload = await request(`/order-advance/cancel/${segment}/${smartOrderType}/${smartOrderId}`, { method: 'POST' });
+      return { smartOrderId, status: payload.status };
+    },
+
+    /**
+     * @param {string} smartOrderId @param {string} [smartOrderType] @param {string} [segment]
+     * @returns {Promise<{smartOrderId:string, status:'ACTIVE'|'CANCELLED'|'COMPLETED', triggeredAt:Date|null}>}
+     */
+    async getSmartOrderStatus(smartOrderId, smartOrderType = GROWW_ORDER.SMART_ORDER_TYPE_OCO, segment = GROWW_ORDER.SEGMENT_CASH) {
+      const payload = await request(`/order-advance/status/${segment}/${smartOrderType}/internal/${smartOrderId}`);
+      return {
+        smartOrderId: payload.smart_order_id,
+        status: payload.status,
+        triggeredAt: payload.triggered_at ? new Date(payload.triggered_at) : null,
+      };
+    },
+
+    /** @param {{segment?:string, smartOrderType?:string, status?:string}} [opts] @returns {Promise<object[]>} */
+    async listSmartOrders(opts = {}) {
+      const payload = await request('/order-advance/list', {
+        query: {
+          segment: opts.segment ?? GROWW_ORDER.SEGMENT_CASH,
+          smart_order_type: opts.smartOrderType ?? GROWW_ORDER.SMART_ORDER_TYPE_OCO,
+          status: opts.status ?? 'ACTIVE',
+          page: 0,
+          page_size: 50,
+        },
+      });
+      return payload?.orders ?? [];
     },
 
     async cancelAllOrders() {

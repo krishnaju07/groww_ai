@@ -24,6 +24,13 @@ function nowIst() {
   return new Date(now.getTime() + IST_OFFSET_MIN * 60 * 1000);
 }
 
+/** @param {Date} [date] @returns {string} IST wall-clock time as 'yyyy-MM-dd HH:mm:ss', the format Groww's historical-candles API expects. */
+export function formatIstTimestamp(date = new Date()) {
+  const ist = new Date(date.getTime() + IST_OFFSET_MIN * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())} ${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}:${pad(ist.getUTCSeconds())}`;
+}
+
 /** @param {string} [userId] @returns {Promise<boolean>} true if NSE cash market is open (Mon-Fri 09:15-15:30 IST), unless systemConfig.ignoreMarketHours is on. */
 export async function isMarketOpen(userId = DEFAULT_USER_ID) {
   const cfg = await getSystemConfig(userId);
@@ -44,7 +51,21 @@ export async function isMarketOpen(userId = DEFAULT_USER_ID) {
  * @returns {{minutesToSquareOff:number, sessionPhase:'pre-market'|'opening'|'mid-day'|'closing'|'after-square-off'}}
  */
 export function getIntradaySessionContext() {
-  const ist = nowIst();
+  return sessionPhaseFor(nowIst());
+}
+
+/**
+ * Same computation as `getIntradaySessionContext()` but for an arbitrary historical
+ * instant instead of wall-clock "now" — lets the backtest engine build a session-phase-
+ * aware IndicatorSnapshot per simulated candle without depending on real time.
+ * @param {Date} at @returns {{minutesToSquareOff:number, sessionPhase:'pre-market'|'opening'|'mid-day'|'closing'|'after-square-off'}}
+ */
+export function getIntradaySessionContextAt(at) {
+  return sessionPhaseFor(new Date(at.getTime() + IST_OFFSET_MIN * 60 * 1000));
+}
+
+/** @param {Date} ist a Date whose UTC-getter fields already read as IST wall-clock time */
+function sessionPhaseFor(ist) {
   const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
 
   if (minutes < MARKET_OPEN_MIN) {

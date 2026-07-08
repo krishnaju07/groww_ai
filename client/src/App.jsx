@@ -9,6 +9,7 @@ import { Settings } from './pages/Settings.jsx';
 import { Brokers } from './pages/Brokers.jsx';
 import { Orders } from './pages/Orders.jsx';
 import { LiveTrading } from './pages/LiveTrading.jsx';
+import { Backtest } from './pages/Backtest.jsx';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/ai-decisions" element={<AIDecisions />} />
+        <Route path="/backtest" element={<Backtest />} />
         <Route path="/live-trading" element={<LiveTrading />} />
         <Route path="/risk" element={<Risk />} />
         <Route path="/brokers" element={<Brokers />} />

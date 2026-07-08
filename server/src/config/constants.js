@@ -68,10 +68,17 @@ export const GROWW_ORDER = {
   VALIDITY_DAY: 'DAY',
   ORDER_TYPE_MARKET: 'MARKET',
   ORDER_TYPE_LIMIT: 'LIMIT',
+  ORDER_TYPE_SL_M: 'SL_M',
   TRANSACTION_BUY: 'BUY',
   TRANSACTION_SELL: 'SELL',
   EXCHANGE_NSE: 'NSE',
   SEGMENT_CASH: 'CASH',
+  // Smart Orders (GTT/OCO) — /order-advance/* endpoints, used to place a broker-side
+  // stop-loss/target safety net alongside positionGuardianJob's own polling.
+  SMART_ORDER_TYPE_GTT: 'GTT',
+  SMART_ORDER_TYPE_OCO: 'OCO',
+  TRIGGER_DIRECTION_UP: 'UP',
+  TRIGGER_DIRECTION_DOWN: 'DOWN',
 };
 
 // --- Indicator knobs fed into the AI context builder ---

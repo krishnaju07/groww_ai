@@ -7,6 +7,7 @@
  */
 import { GROWW_BASE_URL, GROWW_API_VERSION } from '../../config/constants.js';
 import { getAccessToken } from '../brokers/growwAuth.js';
+import { formatIstTimestamp } from '../../utils/marketHours.js';
 
 async function request(path, query) {
   const token = await getAccessToken();
@@ -25,7 +26,24 @@ async function request(path, query) {
   return json?.payload ?? json;
 }
 
+const CANDLE_INTERVAL = { '1m': '1minute', '5m': '5minute', '15m': '15minute', '30m': '30minute', '1d': '1day' };
 const INTERVAL_MINUTES = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1d': 1440 };
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+/**
+ * /historical/candles returns each candle's timestamp as an IST wall-clock string with no
+ * timezone suffix (e.g. "2025-09-24T10:30:00") — `new Date(ts)` would have Node parse that
+ * as local time, silently wrong unless the server process's own TZ happens to be IST (the
+ * exact bug already hit once in marketHours.js's nowIst()). Parse the fields explicitly and
+ * shift by the known IST offset instead of trusting the runtime's local-time interpretation.
+ * @param {string} ts @returns {Date}
+ */
+function parseIstCandleTimestamp(ts) {
+  const [datePart, timePart] = ts.split('T');
+  const [y, mo, d] = datePart.split('-').map(Number);
+  const [h, mi, s] = (timePart ?? '00:00:00').split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, mi, s ?? 0) - IST_OFFSET_MS);
+}
 
 export const GrowwProvider = {
   name: 'groww',
@@ -56,26 +74,52 @@ export const GrowwProvider = {
   },
 
   /**
+   * Uses /historical/candles (the Backtesting-section endpoint) — /historical/candle/range
+   * is deprecated by Groww ("will NOT work in the future") and has been retired from here.
    * @param {string} symbol
-   * @param {'1m'|'5m'|'15m'|'1d'} interval
+   * @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval
    * @param {number} [limit]
    * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
    */
   async getCandles(symbol, interval = '5m', limit = 100) {
     const minutes = INTERVAL_MINUTES[interval] ?? 5;
-    const endTime = Math.floor(Date.now() / 1000);
-    const startTime = endTime - minutes * 60 * limit;
-    const payload = await request('/historical/candle/range', {
-      exchange: 'NSE',
-      segment: 'CASH',
-      trading_symbol: symbol,
-      start_time: String(startTime),
-      end_time: String(endTime),
-      interval_in_minutes: String(minutes),
-    });
-    const rows = payload?.candles ?? [];
-    return rows
-      .map((c) => ({ time: new Date(c[0] * 1000), open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] }))
-      .slice(-limit);
+    const end = new Date();
+    const start = new Date(end.getTime() - minutes * 60 * 1000 * limit);
+    const rows = await fetchCandleRows(symbol, interval, start, end);
+    return rows.slice(-limit);
+  },
+
+  /**
+   * Fetches every candle between two explicit instants — unlike `getCandles` (always
+   * "last N ending now"), this is what the backtest engine needs to walk a specific
+   * historical window. Same endpoint as `getCandles`, just with a caller-supplied
+   * start/end instead of a derived lookback.
+   * @param {string} symbol
+   * @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval
+   * @param {Date} from
+   * @param {Date} to
+   * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
+   */
+  async getCandlesRange(symbol, interval, from, to) {
+    return fetchCandleRows(symbol, interval, from, to);
   },
 };
+
+/**
+ * Shared by `getCandles`/`getCandlesRange` — one call to /historical/candles for an
+ * explicit [start, end) window, parsed into the common Candle[] shape.
+ * @param {string} symbol @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval @param {Date} start @param {Date} end
+ * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
+ */
+async function fetchCandleRows(symbol, interval, start, end) {
+  const payload = await request('/historical/candles', {
+    exchange: 'NSE',
+    segment: 'CASH',
+    groww_symbol: `NSE-${symbol}`,
+    start_time: formatIstTimestamp(start),
+    end_time: formatIstTimestamp(end),
+    candle_interval: CANDLE_INTERVAL[interval] ?? '5minute',
+  });
+  const rows = payload?.candles ?? [];
+  return rows.map((c) => ({ time: parseIstCandleTimestamp(c[0]), open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] }));
+}
