@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Badge } from '../common/Badge.jsx';
+import { ModeSwitch } from '../common/ModeSwitch.jsx';
 import { useSettingsStore } from '../../store/useSettingsStore.js';
 import { healthService } from '../../services/health.service.js';
 
 export function Navbar() {
-  const { tradingMode, fetch } = useSettingsStore();
+  const fetch = useSettingsStore((s) => s.fetch);
   const [now, setNow] = useState(new Date());
   const [health, setHealth] = useState(null);
 
@@ -23,8 +23,6 @@ export function Navbar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isLive = tradingMode?.mode === 'live' && tradingMode?.liveAvailable;
-
   return (
     <div className="border-b border-border/70 bg-surface/40 backdrop-blur-xl">
       <header className="flex items-center justify-between gap-4 px-6 py-3.5">
@@ -39,11 +37,7 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
-          {isLive ? (
-            <Badge tone="danger">LIVE — REAL MONEY</Badge>
-          ) : (
-            <Badge tone="accent">PAPER MODE</Badge>
-          )}
+          <ModeSwitch compact />
         </div>
       </header>
 

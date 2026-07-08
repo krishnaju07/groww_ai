@@ -3,6 +3,7 @@ import { YahooFinanceProvider } from './YahooFinanceProvider.js';
 import { AlphaVantageProvider } from './AlphaVantageProvider.js';
 import { GrowwProvider } from './GrowwProvider.js';
 import { getSystemConfig } from '../config/systemConfig.js';
+import { getSelectedTradingMode } from '../brokers/tradingModeService.js';
 
 const PROVIDERS = {
   yahoo: YahooFinanceProvider,
@@ -11,10 +12,19 @@ const PROVIDERS = {
   mock: MockProvider,
 };
 
-/** Live-editable via Settings (systemConfig.marketDataProvider) — no restart needed. */
+/**
+ * Live-editable via Settings (systemConfig.marketDataProvider) — no restart needed.
+ * While the user has Live mode selected, mock is never a valid primary — real money
+ * decisions must never run on a deliberately-configured fake feed either.
+ */
 async function getPrimary() {
   const { marketDataProvider } = await getSystemConfig();
-  return PROVIDERS[marketDataProvider] ?? YahooFinanceProvider;
+  const configured = PROVIDERS[marketDataProvider] ?? YahooFinanceProvider;
+  if (configured === MockProvider && (await getSelectedTradingMode()) === 'live') {
+    console.warn('[marketData] Live mode is on — ignoring mock provider config, using Yahoo instead.');
+    return YahooFinanceProvider;
+  }
+  return configured;
 }
 
 const LTP_TTL_MS = 3000;
@@ -35,8 +45,14 @@ async function withFallback(primary, fn, fallbackFn, label) {
     return await fn();
   } catch (err) {
     if (primary !== MockProvider) {
-      console.warn(`[marketData] ${primary.name} failed for ${label}, falling back to mock: ${err.message}`);
       fallbackState = { provider: primary.name, at: Date.now(), reason: err.message };
+      if ((await getSelectedTradingMode()) === 'live') {
+        // Real money is on the line — never silently swap in fake prices. Let the
+        // caller see the real failure so it skips/blocks instead of trading blind.
+        console.error(`[marketData] ${primary.name} failed for ${label} while LIVE — refusing mock fallback: ${err.message}`);
+        throw err;
+      }
+      console.warn(`[marketData] ${primary.name} failed for ${label}, falling back to mock: ${err.message}`);
     }
     return fallbackFn();
   }

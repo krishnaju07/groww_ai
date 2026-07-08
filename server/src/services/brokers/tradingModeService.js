@@ -12,6 +12,27 @@ import { hasValidCredential } from './credentialStore.js';
 import { hasGrowwCredentials } from './growwAuth.js';
 import { isTripped } from '../risk/killSwitch.js';
 import { getSystemConfig } from '../config/systemConfig.js';
+import { UserSettings } from '../../models/UserSettings.js';
+import { DEFAULT_USER_ID } from '../../config/constants.js';
+
+let modeCache = null; // {userId, mode, at}
+const MODE_CACHE_TTL_MS = 3000;
+
+/**
+ * Cheap, cached read of just the user's selected tradingMode ('paper'|'live'), for
+ * modules (e.g. marketData) that only need to know "did the user turn Live on" without
+ * threading a full settings doc through every call site. Mirrors systemConfig.js's cache.
+ * @param {string} [userId] @returns {Promise<'paper'|'live'>}
+ */
+export async function getSelectedTradingMode(userId = DEFAULT_USER_ID) {
+  if (modeCache && modeCache.userId === userId && Date.now() - modeCache.at < MODE_CACHE_TTL_MS) {
+    return modeCache.mode;
+  }
+  const settings = await UserSettings.findOne({ userId }).select('tradingMode').lean();
+  const mode = settings?.tradingMode === 'live' ? 'live' : 'paper';
+  modeCache = { userId, mode, at: Date.now() };
+  return mode;
+}
 
 /**
  * Groww's credential lives in server .env (GROWW_API_KEY/SECRET), checked via

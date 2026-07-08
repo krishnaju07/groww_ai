@@ -34,7 +34,15 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
   if (!positions.length) return { ran: true, results: [] };
 
   const autoExit = settings.autoExit ?? {};
-  const ltps = await marketData.getLTPBatch(positions.map((p) => p.symbol));
+  let ltps;
+  try {
+    ltps = await marketData.getLTPBatch(positions.map((p) => p.symbol));
+  } catch (err) {
+    // In live mode a market-data outage now throws instead of masking as mock prices —
+    // skip this tick entirely (retried in 15s) rather than checking stops against fake data.
+    console.error('[positionGuardianJob] market data unavailable, skipping tick:', err.message);
+    return { ran: false, reason: `market data unavailable: ${err.message}` };
+  }
   const results = [];
 
   for (const position of positions) {
