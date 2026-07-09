@@ -20,6 +20,7 @@ import { placeOrder } from '../orderService.js';
 import { effectiveMode } from '../brokers/tradingModeService.js';
 import { isMarketOpen } from '../../utils/marketHours.js';
 import { getSystemConfig } from '../config/systemConfig.js';
+import { getRiskConfig } from '../risk/riskConfig.js';
 
 const AI_CONFIRM_COOLDOWN_MS = 5 * 60 * 1000; // don't re-confirm the same symbol more than once per 5 min
 const lastConfirmAttempt = new Map(); // symbol -> timestamp
@@ -78,20 +79,35 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   const mode = await effectiveMode(userId, settings);
   const brokerName = mode === 'live' ? settings.activeBroker : 'paper';
   const openPositions = await Position.find({ userId, broker: brokerName }).lean();
+  const openPositionsBySymbol = new Map(openPositions.map((p) => [p.symbol, p]));
   const openSymbols = new Set(openPositions.map((p) => p.symbol));
   // Mutable — refreshed as the loop places orders, so maxOpenPositions is actually
   // enforced across symbols within a single tick (the pre-loop snapshot above would
   // otherwise let every symbol in this tick pass the same stale count check).
   let openPositionCount = openPositions.length;
   const minConfidence = settings.autoInvest.minConfidence ?? 75;
+  const riskConfig = await getRiskConfig(userId);
   const results = [];
 
   for (const { symbol } of STOCK_UNIVERSE) {
     try {
       const ctx = await buildContext(symbol, userId);
-      const quantDecision = scoreQuant(symbol, ctx, settings.autoInvest.amountPerTrade);
+      const quantDecision = scoreQuant(symbol, ctx, settings.autoInvest.amountPerTrade, riskConfig.maxLossPerTrade);
 
       if (quantDecision.action === 'WAIT') continue;
+
+      if (quantDecision.action === 'SELL') {
+        // A SELL from quant only ever means "close the existing long" (see the
+        // `!openSymbols.has(symbol)` skip a few lines down — a SELL is never a fresh
+        // short entry on this platform). scoreQuant computes its quantity as an
+        // independent fresh-entry sizing figure, unrelated to what's actually held —
+        // using it to sell risked either leaving a residual position un-exited
+        // (undersized) or the whole order being rejected outright for exceeding the
+        // held quantity (oversized, the exact "No sufficient position to sell" failure
+        // already seen from manual orders). Use the real held quantity instead.
+        const heldQuantity = openPositionsBySymbol.get(symbol)?.quantity;
+        if (heldQuantity) quantDecision.quantity = heldQuantity;
+      }
       // A fresh entry this late has little runway left before the day's forced
       // square-off — don't rely solely on the LLM prompt's guidance to skip these; the
       // quant-only path (requireAiConfirmation off) needs the same backstop. orderService

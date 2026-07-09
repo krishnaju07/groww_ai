@@ -89,6 +89,7 @@
  * @property {'UP'|'DOWN'|'SIDEWAYS'} trendLongTerm 30m-candle trend
  * @property {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}} psar Parabolic SAR (5m) — price above the dot is bullish
  * @property {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}} supertrend ATR-based Supertrend (5m)
+ * @property {number} atr Average True Range (5m, price units) — real volatility, used for stop-loss/target sizing
  * @property {number} minutesToSquareOff minutes until the daily forced square-off (15:15 IST) — 0 once it's passed
  * @property {'pre-market'|'opening'|'mid-day'|'closing'|'after-square-off'} sessionPhase where we are in today's intraday session
  * @property {{support:number, resistance:number}} levels

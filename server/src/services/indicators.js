@@ -76,6 +76,21 @@ export function parabolicSar({ high, low, close }) {
 }
 
 /**
+ * Average True Range — a direct, price-unit volatility measure (unlike RSI/MACD, which
+ * describe momentum, not how much the stock actually moves). Used to size stop-loss/target
+ * to the stock's own real volatility instead of an arbitrary flat percentage that's too
+ * tight for a volatile stock (constant whipsaw stop-outs) or too wide for a calm one
+ * (gives back more than necessary before exiting).
+ * @param {{high:number[], low:number[], close:number[]}} ohlc @param {number} [period]
+ * @returns {number} 0 if there's not enough candle history yet
+ */
+export function atr({ high, low, close }, period = SUPERTREND_PERIOD) {
+  const values = ATR.calculate({ high, low, close, period });
+  const last = values.at(-1);
+  return last != null ? round2(last) : 0;
+}
+
+/**
  * Supertrend — an ATR-based trailing band that flips between acting as support
  * (uptrend) and resistance (downtrend). Not shipped by `technicalindicators`, so
  * it's built here from its ATR output using the standard formulation (ratcheting

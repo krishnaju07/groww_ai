@@ -1,5 +1,5 @@
 import { marketData } from '../marketData/index.js';
-import { rsi, macd, volumeRatio, trend, parabolicSar, supertrend } from '../indicators.js';
+import { rsi, macd, volumeRatio, trend, parabolicSar, supertrend, atr } from '../indicators.js';
 import { supportResistance } from './supportResistance.js';
 import { getNiftySentiment } from './niftySentimentService.js';
 import { getSectorContext } from './sectorContext.js';
@@ -58,6 +58,7 @@ export async function buildContext(symbol, userId = DEFAULT_USER_ID) {
     trendLongTerm: trend(closes30m),
     psar: parabolicSar(ohlc5m),
     supertrend: supertrend(ohlc5m),
+    atr: atr(ohlc5m),
     ...getIntradaySessionContext(),
     levels: supportResistance(candles5m),
     sector: sectorContext.sector,

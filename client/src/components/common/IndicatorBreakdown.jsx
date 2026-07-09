@@ -11,6 +11,7 @@ export function IndicatorBreakdown({ snapshot }) {
     ['Trend (30m)', snapshot.trendLongTerm],
     ['Parabolic SAR', snapshot.psar ? `${snapshot.psar.trend} (₹${snapshot.psar.value})` : undefined],
     ['Supertrend', snapshot.supertrend ? `${snapshot.supertrend.trend} (₹${snapshot.supertrend.value})` : undefined],
+    ['ATR (volatility)', snapshot.atr != null ? `₹${snapshot.atr}` : undefined],
     ['Support / Resistance', snapshot.levels ? `₹${snapshot.levels.support} / ₹${snapshot.levels.resistance}` : undefined],
     ['Sector', snapshot.sector],
     ['Sector relative strength', snapshot.sectorRelativeStrength != null ? `${snapshot.sectorRelativeStrength > 0 ? '+' : ''}${snapshot.sectorRelativeStrength}%` : undefined],

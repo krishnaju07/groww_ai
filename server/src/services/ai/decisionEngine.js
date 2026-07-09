@@ -11,6 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { env } from '../../config/env.js';
 import { UserSettings } from '../../models/UserSettings.js';
+import { getRiskConfig } from '../risk/riskConfig.js';
 import { buildContext } from './contextBuilder.js';
 import { buildSystemPrompt, buildUserContent, DECISION_SCHEMA } from './decisionPrompt.js';
 import { scoreQuant } from './aiSignalService.js';
@@ -135,10 +136,13 @@ export async function callProvider(providerKey, symbol, ctx) {
  * @returns {Promise<import('../../types.js').AiDecision & {decisionId: string, models: object[]}>}
  */
 export async function decide(userId, symbol) {
-  const ctx = await buildContext(symbol, userId);
-  const quant = scoreQuant(symbol, ctx);
+  const [ctx, settings, riskConfig] = await Promise.all([
+    buildContext(symbol, userId),
+    UserSettings.findOne({ userId }).lean(),
+    getRiskConfig(userId),
+  ]);
+  const quant = scoreQuant(symbol, ctx, settings?.autoInvest?.amountPerTrade, riskConfig.maxLossPerTrade);
 
-  const settings = await UserSettings.findOne({ userId }).lean();
   const providerKey = settings?.aiProvider ?? 'openai';
   const provider = PROVIDERS[providerKey] ?? PROVIDERS.openai;
 
