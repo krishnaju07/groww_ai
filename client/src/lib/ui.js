@@ -1,5 +1,3 @@
-export const GLASS_CARD = 'glass-card p-5';
-export const GLASS_CARD_HOVER = 'glass-card-hover p-5';
 export const GRADIENT_TEXT = 'gradient-text font-display font-bold';
 
 export const BTN_PRIMARY =

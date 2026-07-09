@@ -22,7 +22,13 @@ export async function runAiScan(userId = DEFAULT_USER_ID) {
   for (const { symbol } of STOCK_UNIVERSE) {
     try {
       const decision = await decide(userId, symbol);
-      setSignal(symbol, { action: decision.action, confidence: decision.confidence, reason: decision.reason });
+      setSignal(symbol, {
+        action: decision.action,
+        confidence: decision.confidence,
+        reason: decision.reason,
+        justification: decision.justification,
+        scoreBreakdown: decision.scoreBreakdown,
+      });
     } catch (err) {
       console.error(`[aiScanJob] scan failed for ${symbol}:`, err.message);
     }

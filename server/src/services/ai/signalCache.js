@@ -4,9 +4,9 @@
  * already persists via AIDecisionLog. Powers the Dashboard "AI Top Picks"
  * section, StockSelector badges, and Portfolio "AI View" exit hints.
  */
-const cache = new Map(); // symbol -> {action, confidence, reason, updatedAt}
+const cache = new Map(); // symbol -> {action, confidence, reason, justification, scoreBreakdown, updatedAt}
 
-/** @param {string} symbol @param {{action:string, confidence:number, reason:string}} signal */
+/** @param {string} symbol @param {{action:string, confidence:number, reason:string, justification?:string, scoreBreakdown?:object}} signal */
 export function setSignal(symbol, signal) {
   cache.set(symbol, { ...signal, updatedAt: new Date() });
 }
