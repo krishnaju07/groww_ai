@@ -7,7 +7,7 @@ const DOT_TONE = { BUY: 'bg-accent', SELL: 'bg-danger' };
  */
 export function StockSelector({ stocks = [], selected, onSelect, signals = {} }) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
+    <div className="flex flex-wrap gap-2">
       {stocks.map((s) => {
         const signal = signals[s.symbol];
         const dotTone = signal && DOT_TONE[signal.action];
