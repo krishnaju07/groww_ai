@@ -20,13 +20,18 @@ const PlaceOrderSchema = z.object({
   stopLoss: z.coerce.number().positive().optional(),
   target: z.coerce.number().positive().optional(),
   triggerReason: z.string().optional(),
+  aiDecisionId: z.string().optional(),
   confirmRealMoney: z.boolean().optional(),
 });
 
 ordersRoutes.get(
   '/',
   asyncHandler(async (req, res) => {
-    const localOrders = await Order.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(100).lean();
+    const localOrders = await Order.find({ userId: req.userId })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .populate('aiDecisionId', 'confidence reason justification scoreBreakdown')
+      .lean();
 
     const settings = await UserSettings.findOne({ userId: req.userId }).lean();
     const mode = await effectiveMode(req.userId, settings);
@@ -36,8 +41,8 @@ ordersRoutes.get(
     }
 
     // Live mode: the broker's own order list is the source of truth (it also
-    // reflects orders placed outside this app, e.g. directly on Groww/Zerodha/
-    // Angel One) — merge in local metadata (source, confirmRealMoney, reject
+    // reflects orders placed outside this app, e.g. directly on Groww's own site/app)
+    // — merge in local metadata (source, confirmRealMoney, reject
     // reason) by brokerOrderId where we have it, else show broker-only fields.
     const broker = brokerFor(settings.activeBroker, req.userId);
     const localByBrokerId = new Map(localOrders.filter((o) => o.brokerOrderId).map((o) => [o.brokerOrderId, o]));
@@ -65,6 +70,8 @@ ordersRoutes.get(
         source: local?.source ?? 'external',
         confirmedRealMoney: local?.confirmedRealMoney ?? true,
         rejectReason: local?.rejectReason ?? '',
+        triggerReason: local?.triggerReason ?? '',
+        aiDecisionId: local?.aiDecisionId ?? null,
         createdAt: bo.createdAt ?? local?.createdAt ?? null,
       };
     });

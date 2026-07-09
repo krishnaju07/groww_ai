@@ -3,7 +3,7 @@
  * client/src/types.js — keep both in sync when a shape changes.
  */
 
-/** @typedef {'paper'|'groww'|'zerodha'|'angelone'} BrokerName */
+/** @typedef {'paper'|'groww'} BrokerName */
 /** @typedef {'paper'|'live'} TradingMode */
 /** @typedef {'BUY'|'SELL'} Action */
 /** @typedef {'BUY'|'SELL'|'WAIT'} AiAction */

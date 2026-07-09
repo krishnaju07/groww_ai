@@ -5,7 +5,7 @@ import { settingsService } from '../../services/settings.service.js';
 import { toast } from '../../store/useToastStore.js';
 import { brokersService } from '../../services/brokers.service.js';
 
-const BROKER_LABELS = { paper: 'Paper', groww: 'Groww', angelone: 'Angel One', zerodha: 'Zerodha' };
+const BROKER_LABELS = { paper: 'Paper', groww: 'Groww' };
 
 /**
  * @param {{tradingMode:object, brokerStatus:object, onChanged:()=>void}} props

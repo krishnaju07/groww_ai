@@ -1,14 +1,12 @@
 /**
- * The generalized 5-layer safety gate (extends the old single-broker Groww-only
- * gate to every broker):
+ * The 5-layer safety gate for real-money orders (Groww is the only live broker):
  *   1. systemConfig.enableLiveTrading === true (master switch, UI-editable, default from .env)
- *   2. a valid credential for the SPECIFIC active broker (credentialStore)
- *   3. the user explicitly selected live mode + a non-paper active broker
+ *   2. Groww credentials configured (GROWW_API_KEY/SECRET in server .env)
+ *   3. the user explicitly selected live mode + the groww active broker
  *   4. the kill switch is not tripped (checked first — nothing else matters if it is)
  *   5. a per-order "REAL MONEY" confirmation from the client (enforced in orderService)
  * Unattended (cron) live orders additionally require systemConfig.enableLiveAutoTrading.
  */
-import { hasValidCredential } from './credentialStore.js';
 import { hasGrowwCredentials } from './growwAuth.js';
 import { isTripped } from '../risk/killSwitch.js';
 import { getSystemConfig } from '../config/systemConfig.js';
@@ -35,14 +33,12 @@ export async function getSelectedTradingMode(userId = DEFAULT_USER_ID) {
 }
 
 /**
- * Groww's credential lives in server .env (GROWW_API_KEY/SECRET), checked via
- * hasGrowwCredentials() — NOT the BrokerCredential DB collection that Angel One
- * and Zerodha use. This is the single place that dispatches correctly per broker.
- * @param {string} userId @param {string} brokerName @returns {Promise<boolean>}
+ * Groww is the only live broker this platform integrates with — its credential
+ * lives in server .env (GROWW_API_KEY/SECRET), checked via hasGrowwCredentials().
+ * @param {string} brokerName @returns {boolean}
  */
-async function hasBrokerCredential(userId, brokerName) {
-  if (brokerName === 'groww') return hasGrowwCredentials();
-  return hasValidCredential(userId, brokerName);
+function hasBrokerCredential(brokerName) {
+  return brokerName === 'groww' && hasGrowwCredentials();
 }
 
 /** @param {string} userId @param {string} brokerName @returns {Promise<boolean>} */
@@ -51,7 +47,7 @@ export async function isLiveConfigured(userId, brokerName) {
   const cfg = await getSystemConfig(userId);
   if (!cfg.enableLiveTrading) return false;
   if (await isTripped(userId)) return false;
-  return hasBrokerCredential(userId, brokerName);
+  return hasBrokerCredential(brokerName);
 }
 
 /** @param {string} userId @param {string} brokerName @throws {Error & {code:string, status:number}} */
@@ -75,7 +71,7 @@ export async function assertLiveAllowed(userId, brokerName) {
     e.status = 400;
     throw e;
   }
-  if (!(await hasBrokerCredential(userId, brokerName))) {
+  if (!hasBrokerCredential(brokerName)) {
     const e = new Error(`No valid ${brokerName} credentials configured.`);
     e.code = 'NO_BROKER_CREDENTIALS';
     e.status = 403;
@@ -100,7 +96,7 @@ export async function effectiveMode(userId, settings) {
  * @returns {Promise<import('../../types.js').TradingModeStatus>}
  */
 export async function getTradingModeStatus(userId, settings) {
-  const hasCredential = settings.activeBroker !== 'paper' && (await hasBrokerCredential(userId, settings.activeBroker));
+  const hasCredential = settings.activeBroker !== 'paper' && hasBrokerCredential(settings.activeBroker);
   const cfg = await getSystemConfig(userId);
   const liveEnabledEnv = cfg.enableLiveTrading === true;
   const killSwitchEngaged = await isTripped(userId);

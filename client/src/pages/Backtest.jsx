@@ -172,7 +172,7 @@ export function Backtest() {
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Stop-loss (%)</label>
+            <label className="mb-1 block text-xs font-medium text-muted">Stop-loss cap (%)</label>
             <input
               type="number"
               min={0.1}
@@ -181,10 +181,11 @@ export function Backtest() {
               onChange={(e) => setForm((f) => ({ ...f, stopLossPercent: Number(e.target.value) }))}
               className={INPUT}
             />
+            <p className="mt-1 text-[11px] text-muted">The AI sizes its own stop off real volatility (ATR) — this just bounds it.</p>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Target (%)</label>
+            <label className="mb-1 block text-xs font-medium text-muted">Target cap (%)</label>
             <input
               type="number"
               min={0.1}
@@ -193,6 +194,7 @@ export function Backtest() {
               onChange={(e) => setForm((f) => ({ ...f, targetPercent: Number(e.target.value) }))}
               className={INPUT}
             />
+            <p className="mt-1 text-[11px] text-muted">Same idea — caps the ATR-based target, doesn't replace it.</p>
           </div>
 
           <div className="flex items-end gap-3">

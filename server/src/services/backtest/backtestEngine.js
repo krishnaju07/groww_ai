@@ -1,12 +1,13 @@
 import { GrowwProvider } from '../marketData/GrowwProvider.js';
-import { rsi, macd, volumeRatio, trend, parabolicSar, supertrend } from '../indicators.js';
+import { rsi, macd, volumeRatio, trend, parabolicSar, supertrend, atr } from '../indicators.js';
 import { supportResistance } from '../ai/supportResistance.js';
 import { scoreQuant } from '../ai/aiSignalService.js';
 import { getIntradaySessionContextAt } from '../../utils/marketHours.js';
-import { round2, applyPercent, percentOf } from '../../utils/format.js';
+import { round2, percentOf } from '../../utils/format.js';
 import { UserSettings } from '../../models/UserSettings.js';
+import { getRiskConfig } from '../risk/riskConfig.js';
 import { BacktestResult } from '../../models/BacktestResult.js';
-import { DEFAULT_USER_ID, DEFAULT_STARTING_CAPITAL } from '../../config/constants.js';
+import { DEFAULT_USER_ID, DEFAULT_STARTING_CAPITAL, DEFAULT_RISK_CONFIG } from '../../config/constants.js';
 
 const LOOKBACK_CANDLES = 100; // rolling indicator window — mirrors contextBuilder's live fetch size
 const WARMUP_CANDLES = 30; // minimum 5m history the engine wants before it'll consider a signal
@@ -20,6 +21,8 @@ const MAX_EQUITY_POINTS = 500; // downsample the stored/charted equity curve
  * auto-trading engine treats SELL as an exit signal, never a fresh short entry).
  * @param {string} userId
  * @param {{symbol:string, interval?:'5m'|'15m'|'30m', from:Date, to:Date, startingCapital?:number, amountPerTrade?:number, minConfidence?:number, stopLossPercent?:number, targetPercent?:number, trailingEnabled?:boolean, trailingPercent?:number}} input
+ * stopLossPercent/targetPercent cap the ATR-based stop/target scoreQuant computes — they
+ * don't replace it (see the position-open block below).
  * @returns {Promise<import('../../models/BacktestResult.js').BacktestResult>}
  */
 export async function runBacktest(userId = DEFAULT_USER_ID, input) {
@@ -32,7 +35,8 @@ export async function runBacktest(userId = DEFAULT_USER_ID, input) {
     throw e;
   }
 
-  const settings = await UserSettings.findOne({ userId }).lean();
+  const [settings, riskConfig] = await Promise.all([UserSettings.findOne({ userId }).lean(), getRiskConfig(userId)]);
+  const maxLossPerTrade = riskConfig?.maxLossPerTrade ?? DEFAULT_RISK_CONFIG.maxLossPerTrade;
   const cfg = {
     startingCapital: input.startingCapital ?? DEFAULT_STARTING_CAPITAL,
     amountPerTrade: input.amountPerTrade ?? settings?.autoInvest?.amountPerTrade ?? 5000,
@@ -128,17 +132,21 @@ export async function runBacktest(userId = DEFAULT_USER_ID, input) {
       trendLongTerm: trend(closes30m),
       psar: parabolicSar(ohlc5m),
       supertrend: supertrend(ohlc5m),
+      atr: atr(ohlc5m),
       ...getIntradaySessionContextAt(candle.time),
       levels: supportResistance(window5m),
-      // Sector/Nifty context is live-fetch-only (no historical equivalent exists yet) —
-      // neutral-stubbed rather than faked, so they simply contribute 0 to the quant score
-      // instead of silently feeding in today's live sentiment for a past date.
+      // Sector/Nifty/news/track-record context is live-fetch-only (no historical equivalent
+      // exists yet) — neutral-stubbed rather than faked, so they simply contribute 0 (or are
+      // skipped entirely, for news/trackRecord) to the quant score instead of silently
+      // feeding in today's live sentiment/headlines for a past date.
       sector: '',
       sectorRelativeStrength: 0,
       niftySentiment: '',
+      news: [],
+      trackRecord: { totalClosed: 0, winRate: null, avgPnl: null },
     };
 
-    const decision = scoreQuant(symbolUpper, snapshot, cfg.amountPerTrade);
+    const decision = scoreQuant(symbolUpper, snapshot, cfg.amountPerTrade, maxLossPerTrade);
 
     if (position) {
       if (candle.high > position.highestPriceSeen) position.highestPriceSeen = candle.high;
@@ -166,12 +174,20 @@ export async function runBacktest(userId = DEFAULT_USER_ID, input) {
       const quantity = Math.min(decision.quantity, affordableQty);
       if (quantity >= 1) {
         capital = round2(capital - candle.close * quantity);
+        // Base the actual stop/target on the ATR-based figures scoreQuant itself computed
+        // — that's what the live auto-trading engine really places on every entry (see
+        // autoTradingService.js), not a flat percentage. cfg.stopLossPercent/targetPercent
+        // (the Backtest page's "Stop Loss %"/"Target %" inputs) still do something real:
+        // they cap the ATR distance so a user can bound worst-case risk/reward regardless
+        // of how wide a given stock's volatility gets, rather than silently being ignored.
+        const stopDistance = Math.min(Math.abs(candle.close - decision.stopLoss), candle.close * (cfg.stopLossPercent / 100));
+        const targetDistance = Math.min(Math.abs(decision.target - candle.close), candle.close * (cfg.targetPercent / 100));
         position = {
           entryPrice: candle.close,
           entryTime: candle.time,
           quantity,
-          stopLoss: applyPercent(candle.close, -cfg.stopLossPercent),
-          target: applyPercent(candle.close, cfg.targetPercent),
+          stopLoss: round2(candle.close - stopDistance),
+          target: round2(candle.close + targetDistance),
           highestPriceSeen: candle.close,
         };
       }

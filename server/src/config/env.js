@@ -12,23 +12,12 @@ const Schema = z.object({
   MONGODB_URI: z.string().default('mongodb://localhost:27017/groww_ai'),
   CLIENT_ORIGIN: z.string().default('http://localhost:5173'),
 
-  MARKET_DATA_PROVIDER: z.enum(['yahoo', 'groww', 'alphavantage', 'mock']).default('yahoo'),
-  ALPHA_VANTAGE_API_KEY: z.string().optional().default(''),
+  MARKET_DATA_PROVIDER: z.enum(['yahoo', 'groww', 'mock']).default('yahoo'),
 
   GROWW_ACCESS_TOKEN: z.string().optional().default(''),
   GROWW_API_KEY: z.string().optional().default(''),
   GROWW_API_SECRET: z.string().optional().default(''),
   GROWW_TOTP_SECRET: z.string().optional().default(''),
-
-  ZERODHA_API_KEY: z.string().optional().default(''),
-  ZERODHA_API_SECRET: z.string().optional().default(''),
-
-  ANGELONE_API_KEY: z.string().optional().default(''),
-  ANGELONE_CLIENT_CODE: z.string().optional().default(''),
-  ANGELONE_PASSWORD: z.string().optional().default(''),
-  ANGELONE_TOTP_SECRET: z.string().optional().default(''),
-
-  BROKER_CREDENTIAL_KEY: z.string().optional().default(''),
 
   IGNORE_MARKET_HOURS: boolStr(true),
   AUTO_TRADING_ENABLED: boolStr(true),

@@ -1,19 +1,15 @@
 /**
  * Resolves a broker name to a live adapter instance, one per (broker, userId),
- * cached for the process lifetime. Real broker adapters (Groww/Zerodha/AngelOne)
- * are added here as they're built; PaperBroker needs no credentials so it's
- * always available.
+ * cached for the process lifetime. Groww is the only real broker adapter this
+ * platform integrates with; PaperBroker needs no credentials so it's always
+ * available as the safe default/simulation mode.
  */
 import { createPaperBroker } from './PaperBroker.js';
 import { createGrowwBroker } from './GrowwBroker.js';
-import { createAngelOneBroker } from './AngelOneBroker.js';
-import { createZerodhaBroker } from './ZerodhaBroker.js';
 
 const FACTORIES = {
   paper: createPaperBroker,
   groww: createGrowwBroker,
-  angelone: createAngelOneBroker,
-  zerodha: createZerodhaBroker,
 };
 
 const instances = new Map(); // `${broker}:${userId}` -> adapter

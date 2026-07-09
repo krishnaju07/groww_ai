@@ -6,8 +6,7 @@
  */
 import { RiskConfig } from '../../models/RiskConfig.js';
 import { RiskEvent } from '../../models/RiskEvent.js';
-import { BrokerCredential } from '../../models/BrokerCredential.js';
-import { brokerFor, availableBrokers } from '../brokers/registry.js';
+import { brokerFor } from '../brokers/registry.js';
 import { hasGrowwCredentials } from '../brokers/growwAuth.js';
 import { getRiskConfig } from './riskConfig.js';
 
@@ -15,21 +14,15 @@ let cachedTripped = null; // {value, at} — short TTL cache, avoids a DB hit on
 const TRIPPED_CACHE_TTL_MS = 3000;
 
 /**
- * @param {string} userId
- * @returns {Promise<string[]>} broker names currently usable for this user (paper + any with
- * a stored credential). Groww is a special case — its credential lives in server .env
- * (GROWW_API_KEY/SECRET), not the BrokerCredential collection like Angel One/Zerodha, so it
- * needs its own check here or trip() would silently skip cancelling/closing Groww orders and
- * positions entirely — the emergency stop doing nothing for whichever broker is actually
- * connected would defeat the entire point of a kill switch.
+ * @returns {string[]} broker names to sweep — paper always (nothing to lose by trying), plus
+ * Groww whenever its .env credentials are configured. Groww's credential isn't in any DB
+ * collection (unlike a per-user credential store), so this check can't be skipped or the
+ * emergency stop would silently do nothing for the one real broker actually connected —
+ * defeating the entire point of a kill switch.
  */
-async function connectedBrokers(userId) {
+function connectedBrokers() {
   const brokers = ['paper'];
   if (hasGrowwCredentials()) brokers.push('groww');
-  const creds = await BrokerCredential.find({ userId }).lean();
-  for (const c of creds) {
-    if (availableBrokers().includes(c.broker) && !brokers.includes(c.broker)) brokers.push(c.broker);
-  }
   return brokers;
 }
 
@@ -51,7 +44,7 @@ export async function trip(userId, reason = 'manual') {
   );
   cachedTripped = { userId, value: true, at: Date.now() };
 
-  const brokers = await connectedBrokers(userId);
+  const brokers = connectedBrokers();
   const errors = [];
   for (const brokerName of brokers) {
     try {

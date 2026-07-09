@@ -1,6 +1,5 @@
 import { MockProvider } from './MockProvider.js';
 import { YahooFinanceProvider } from './YahooFinanceProvider.js';
-import { AlphaVantageProvider } from './AlphaVantageProvider.js';
 import { GrowwProvider } from './GrowwProvider.js';
 import { getSystemConfig } from '../config/systemConfig.js';
 import { getSelectedTradingMode } from '../brokers/tradingModeService.js';
@@ -8,7 +7,6 @@ import { getSelectedTradingMode } from '../brokers/tradingModeService.js';
 const PROVIDERS = {
   yahoo: YahooFinanceProvider,
   groww: GrowwProvider,
-  alphavantage: AlphaVantageProvider,
   mock: MockProvider,
 };
 

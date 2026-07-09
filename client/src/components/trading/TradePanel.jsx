@@ -58,6 +58,7 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced }) {
         stopLoss: stopLoss || undefined,
         target: target || undefined,
         triggerReason: decision && decision.action === action ? decision.reason : 'manual',
+        aiDecisionId: decision && decision.action === action ? decision.decisionId : undefined,
         confirmRealMoney,
       });
       toast.success(`${action} ${quantity} ${symbol} placed${confirmRealMoney ? ' — REAL MONEY' : ''}`);

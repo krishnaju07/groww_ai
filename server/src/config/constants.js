@@ -18,8 +18,8 @@ export const STOCK_UNIVERSE = [
 
 export const NIFTY_INDEX_SYMBOL = 'NIFTY 50';
 
-/** Broker identifiers used across UserSettings.activeBroker, BrokerCredential.broker, Trade/Order/Position.broker. */
-export const BROKERS = /** @type {const} */ (['paper', 'groww', 'zerodha', 'angelone']);
+/** Broker identifiers used across UserSettings.activeBroker, Trade/Order/Position.broker. Paper (simulation) and Groww (the only live broker this platform integrates with) are the only two. */
+export const BROKERS = /** @type {const} */ (['paper', 'groww']);
 
 /** Trading modes. */
 export const TRADING_MODES = /** @type {const} */ (['paper', 'live']);
@@ -33,8 +33,15 @@ export const AI_ACTIONS = /** @type {const} */ (['BUY', 'SELL', 'WAIT']);
 /** LLM providers the decision engine can call — switchable live from Settings. */
 export const AI_PROVIDERS = /** @type {const} */ (['claude', 'openai']);
 
-/** Market-data providers — switchable live from Settings (UserSettings.systemConfig.marketDataProvider). */
-export const MARKET_DATA_PROVIDERS = /** @type {const} */ (['yahoo', 'groww', 'alphavantage', 'mock']);
+/**
+ * Market-data providers — switchable live from Settings (UserSettings.systemConfig.marketDataProvider).
+ * 'mock' is not a third-party integration — it's a local synthetic-data generator with zero
+ * external calls, used only as marketData/index.js's internal fail-safe fallback (and,
+ * transparently labeled "offline", as an optional manual pick for dev/testing outside market
+ * hours) — it never activates while trading Live. 'groww' currently has no working live-data
+ * entitlement on this account (see GrowwProvider.js) but stays selectable for when it does.
+ */
+export const MARKET_DATA_PROVIDERS = /** @type {const} */ (['yahoo', 'groww', 'mock']);
 
 export const ORDER_STATUSES = /** @type {const} */ ([
   'PENDING',

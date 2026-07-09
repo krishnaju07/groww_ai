@@ -8,7 +8,6 @@ import { toast } from '../store/useToastStore.js';
 const MARKET_DATA_PROVIDERS = [
   { key: 'yahoo', label: 'Yahoo Finance' },
   { key: 'groww', label: 'Groww' },
-  { key: 'alphavantage', label: 'Alpha Vantage' },
   { key: 'mock', label: 'Mock (offline)' },
 ];
 

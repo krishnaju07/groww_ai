@@ -1,34 +1,22 @@
-import { useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useBrokerStore } from '../store/useBrokerStore.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { BrokerCard } from '../components/brokers/BrokerCard.jsx';
 import { brokersService } from '../services/brokers.service.js';
-import { toast } from '../store/useToastStore.js';
 
 export function Brokers() {
   const status = useBrokerStore((s) => s.status);
   const fetchStatus = useBrokerStore((s) => s.fetch);
-  const [searchParams, setSearchParams] = useSearchParams();
 
   usePolling(fetchStatus, 15000);
-
-  useEffect(() => {
-    if (searchParams.get('zerodha') === 'connected') {
-      toast.success('Zerodha connected');
-      fetchStatus();
-      setSearchParams({}, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold">Brokers</h1>
         <p className="text-sm text-muted">
-          Connect real broker accounts here. Switching between Paper/Live mode and the live-money safety switches now
-          live on the <Link to="/live-trading" className="text-accent underline">Live Trading page</Link>.
+          Groww is the only broker this platform connects to for real-money trading. Switching between Paper/Live mode
+          and the live-money safety switches live on the <Link to="/live-trading" className="text-accent underline">Live Trading page</Link>.
         </p>
       </div>
 
@@ -43,31 +31,6 @@ export function Brokers() {
             await brokersService.testGroww();
             await fetchStatus();
           }}
-        />
-        <BrokerCard
-          name="angelone"
-          label="Angel One"
-          connected={status?.angelone?.connected}
-          description="Free API access. Enter your Smart API credentials to connect."
-          fields={[
-            { key: 'apiKey', label: 'API Key' },
-            { key: 'clientCode', label: 'Client Code' },
-            { key: 'password', label: 'Password / PIN', type: 'password' },
-            { key: 'totpSecret', label: 'TOTP Secret (base32)', type: 'password' },
-          ]}
-          onConnect={(values) => brokersService.connectAngelOne(values).then(fetchStatus)}
-          onDisconnect={() => brokersService.disconnectAngelOne().then(fetchStatus)}
-        />
-        <BrokerCard
-          name="zerodha"
-          label="Zerodha"
-          connected={status?.zerodha?.connected}
-          description="Requires a daily browser login (Kite Connect). Click Reconnect each trading day."
-          onReconnectRedirect={async () => {
-            const { url } = await brokersService.zerodhaLoginUrl();
-            window.location.href = url;
-          }}
-          onDisconnect={() => brokersService.disconnectZerodha().then(fetchStatus)}
         />
       </div>
     </div>

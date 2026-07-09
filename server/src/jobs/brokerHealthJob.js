@@ -1,29 +1,38 @@
 import cron from 'node-cron';
-import { BrokerCredential } from '../models/BrokerCredential.js';
+import { brokerFor } from '../services/brokers/registry.js';
+import { hasGrowwCredentials } from '../services/brokers/growwAuth.js';
 import { trip } from '../services/risk/killSwitch.js';
+import { getSelectedTradingMode } from '../services/brokers/tradingModeService.js';
 import { DEFAULT_USER_ID } from '../config/constants.js';
 
 const FAILURE_THRESHOLD = 3;
-const failureCounts = new Map(); // broker -> consecutive failure count
+let failureCount = 0;
 
-/** Periodic broker connectivity/token-expiry check. Trips the kill switch after repeated failures on a live broker. */
+/**
+ * Periodic Groww connectivity check — uses GrowwBroker.isConnected() (a real /user/detail
+ * capability check, not just "can a token be minted") and trips the kill switch after
+ * repeated failures while the user is actually in Live mode. A paper-mode failure is
+ * logged but doesn't trip anything — there's no real exposure to protect yet.
+ */
 export function startBrokerHealthJob() {
   cron.schedule('0 */5 * * * *', async () => {
-    const creds = await BrokerCredential.find({ userId: DEFAULT_USER_ID }).lean();
-    for (const cred of creds) {
-      const expired = cred.expiresAt && new Date(cred.expiresAt).getTime() < Date.now();
-      if (expired) {
-        const count = (failureCounts.get(cred.broker) ?? 0) + 1;
-        failureCounts.set(cred.broker, count);
-        console.warn(`[brokerHealthJob] ${cred.broker} credential expired (failure ${count}/${FAILURE_THRESHOLD})`);
-        if (count >= FAILURE_THRESHOLD) {
-          await trip(DEFAULT_USER_ID, `${cred.broker} credential expired ${count}x — auto-stopped for safety`);
-          failureCounts.set(cred.broker, 0);
-        }
-      } else {
-        failureCounts.set(cred.broker, 0);
+    if (!hasGrowwCredentials()) return; // nothing configured to check yet
+    try {
+      const ok = await brokerFor('groww', DEFAULT_USER_ID).isConnected();
+      if (ok) {
+        failureCount = 0;
+        return;
       }
+      failureCount += 1;
+      console.warn(`[brokerHealthJob] Groww not connected (failure ${failureCount}/${FAILURE_THRESHOLD})`);
+      if (failureCount >= FAILURE_THRESHOLD) {
+        failureCount = 0;
+        if ((await getSelectedTradingMode()) !== 'live') return;
+        await trip(DEFAULT_USER_ID, `Groww connectivity check failed ${FAILURE_THRESHOLD}x in a row — auto-stopped for safety`);
+      }
+    } catch (err) {
+      console.error('[brokerHealthJob] Groww connectivity check errored:', err.message);
     }
   });
-  console.log('[brokerHealthJob] scheduled (every 5m)');
+  console.log('[brokerHealthJob] scheduled (every 5m) — Groww connectivity');
 }

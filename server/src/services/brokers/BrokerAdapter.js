@@ -1,8 +1,8 @@
 /**
- * The contract every broker adapter (PaperBroker, GrowwBroker, ZerodhaBroker,
- * AngelOneBroker) implements — see types.js `BrokerAdapter` typedef for the full
- * method signatures. This file documents the contract and a couple of invariants
- * that aren't expressible in JSDoc alone:
+ * The contract every broker adapter (PaperBroker, GrowwBroker) implements — see
+ * types.js `BrokerAdapter` typedef for the full method signatures. This file
+ * documents the contract and a couple of invariants that aren't expressible in
+ * JSDoc alone:
  *
  * - `placeOrder`/`modifyOrder`/`cancelOrder` NEVER get called directly by routes,
  *   AI code, or the cron job — only orderService.placeOrder() and killSwitch.trip()

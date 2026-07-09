@@ -277,6 +277,8 @@ export async function placeOrder(userId, input) {
         source,
         confirmedRealMoney: Boolean(input.confirmRealMoney),
         rejectReason: riskResult.reason,
+        triggerReason: input.triggerReason ?? '',
+        aiDecisionId: input.aiDecisionId ?? null,
       });
     } catch (err) {
       if (err.code !== 'DUPLICATE_ORDER') throw err;
@@ -299,6 +301,8 @@ export async function placeOrder(userId, input) {
     idempotencyKey,
     source,
     confirmedRealMoney: Boolean(input.confirmRealMoney),
+    triggerReason: input.triggerReason ?? '',
+    aiDecisionId: input.aiDecisionId ?? null,
   });
 
   try {

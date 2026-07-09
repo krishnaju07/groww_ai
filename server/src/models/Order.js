@@ -19,6 +19,12 @@ const OrderSchema = new mongoose.Schema(
     source: { type: String, enum: TRADE_SOURCES, default: 'manual' },
     confirmedRealMoney: { type: Boolean, default: false },
     rejectReason: { type: String, default: '' },
+    // Every order's "why" — automatic/AI orders get the triggering signal's reason;
+    // manual orders get 'manual' or the AI's reason if the user acted on a live "Ask AI"
+    // read. aiDecisionId links straight to the full AIDecisionLog (confidence,
+    // justification, score breakdown, indicator snapshot) when one exists.
+    triggerReason: { type: String, default: '' },
+    aiDecisionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AIDecisionLog', default: null },
     tradeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Trade', default: null },
   },
   { timestamps: true },

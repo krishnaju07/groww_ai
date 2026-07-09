@@ -34,7 +34,17 @@ export function OrderBook({ orders = [], onCancel }) {
                   </td>
                   <td className="py-2">{o.quantity}</td>
                   <td className="py-2 capitalize text-muted">{o.broker}</td>
-                  <td className="py-2 capitalize text-muted">{o.source}</td>
+                  <td className="py-2">
+                    <span className="capitalize text-muted">{o.source}</span>
+                    {o.aiDecisionId?.confidence != null && (
+                      <span className="ml-1.5 text-xs font-semibold text-accent">{o.aiDecisionId.confidence}%</span>
+                    )}
+                    {(o.aiDecisionId?.reason || o.triggerReason) && (
+                      <div className="mt-0.5 max-w-[220px] truncate text-xs text-muted" title={o.aiDecisionId?.reason || o.triggerReason}>
+                        {o.aiDecisionId?.reason || o.triggerReason}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-2">
                     <Badge tone={STATUS_TONE[o.status] || 'default'}>{o.status}</Badge>
                     {o.rejectReason && <div className="mt-0.5 text-xs text-danger">{o.rejectReason}</div>}
