@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "GrowwAI — AI-powered Indian-equity paper-trading app (JavaScript/ESM monorepo).",
+  "description": "GrowwAI — Claude/GPT-driven intraday auto-trading platform for Indian equities via the Groww Trade API (JavaScript/ESM monorepo).",
   "engines": {
     "node": ">=18"
   },
