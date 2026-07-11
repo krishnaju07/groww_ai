@@ -4,6 +4,7 @@ import { usePortfolioStore } from '../store/usePortfolioStore.js';
 import { useAIStore } from '../store/useAIStore.js';
 import { useAISignalsStore } from '../store/useAISignalsStore.js';
 import { stocksService } from '../services/stocks.service.js';
+import { watchlistService } from '../services/watchlist.service.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { StockSelector } from '../components/trading/StockSelector.jsx';
 import { OptionsSelector } from '../components/trading/OptionsSelector.jsx';
@@ -30,10 +31,33 @@ export function Trade() {
   const [optionContract, setOptionContract] = useState(null);
   const [candles, setCandles] = useState([]);
   const [decision, setDecision] = useState(null);
+  const [focusOptionUnderlyings, setFocusOptionUnderlyings] = useState([]);
 
   usePolling(fetchWatchlist, 10000);
   usePolling(fetchPortfolio, 5000);
   usePolling(fetchSignals, 30000);
+
+  function refreshOptionFocus() {
+    watchlistService.get().then((data) => setFocusOptionUnderlyings(data.optionUnderlyings.map((u) => u.symbol)));
+  }
+  useEffect(() => {
+    refreshOptionFocus();
+  }, []);
+
+  async function handleAddEquity(sym) {
+    await watchlistService.addEquity(sym);
+    fetchWatchlist();
+  }
+  async function handleRemoveEquity(sym) {
+    await watchlistService.removeEquity(sym);
+    fetchWatchlist();
+    if (symbol === sym) setSymbol(watchlist.find((s) => s.symbol !== sym)?.symbol ?? '');
+  }
+  async function handleToggleOptionFocus(sym) {
+    if (focusOptionUnderlyings.includes(sym)) await watchlistService.removeOption(sym);
+    else await watchlistService.addOption(sym);
+    refreshOptionFocus();
+  }
 
   const isOptions = mode === 'OPTIONS';
   const activeSymbol = isOptions ? optionContract?.tradingSymbol : symbol;
@@ -44,7 +68,8 @@ export function Trade() {
     if (isOptions) {
       // No historical-candle route exists yet for option contracts — the chart shows the
       // underlying's own price action, which is what actually drives the AI's directional read.
-      stocksService.candles(optionContract.underlying === 'NIFTY' ? 'NIFTY 50' : optionContract.underlying, '5m', 100).then(setCandles);
+      const spotSymbol = optionContract.spotSymbol ?? optionContract.underlying;
+      stocksService.candles(spotSymbol, '5m', 100).then(setCandles);
       return;
     }
     stocksService.candles(activeSymbol, '5m', 100).then(setCandles);
@@ -66,6 +91,7 @@ export function Trade() {
         const side = d.optionType === 'CE' ? d.indicatorsSnapshot?.ce : d.indicatorsSnapshot?.pe;
         setOptionContract({
           underlying: d.underlying,
+          spotSymbol: optionContract.spotSymbol,
           strike: d.strike,
           expiry: d.expiry,
           optionType: d.optionType,
@@ -103,9 +129,21 @@ export function Trade() {
       </div>
 
       {isOptions ? (
-        <OptionsSelector selected={optionContract} onSelectContract={setOptionContract} />
+        <OptionsSelector
+          selected={optionContract}
+          onSelectContract={setOptionContract}
+          focusUnderlyings={focusOptionUnderlyings}
+          onToggleFocus={handleToggleOptionFocus}
+        />
       ) : (
-        <StockSelector stocks={watchlist} selected={symbol} onSelect={setSymbol} signals={signals} />
+        <StockSelector
+          stocks={watchlist}
+          selected={symbol}
+          onSelect={setSymbol}
+          onAdd={handleAddEquity}
+          onRemove={handleRemoveEquity}
+          signals={signals}
+        />
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

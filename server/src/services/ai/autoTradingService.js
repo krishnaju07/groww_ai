@@ -9,7 +9,7 @@
  * Every order still routes through riskManager.canTrade() via orderService.placeOrder()
  * — the same choke point manual and AI-triggered orders use.
  */
-import { DEFAULT_USER_ID, STOCK_UNIVERSE, OPTION_UNDERLYINGS } from '../../config/constants.js';
+import { DEFAULT_USER_ID } from '../../config/constants.js';
 import { UserSettings } from '../../models/UserSettings.js';
 import { Position } from '../../models/Position.js';
 import { AIDecisionLog } from '../../models/AIDecisionLog.js';
@@ -21,9 +21,15 @@ import { effectiveMode } from '../brokers/tradingModeService.js';
 import { isMarketOpen } from '../../utils/marketHours.js';
 import { getSystemConfig } from '../config/systemConfig.js';
 import { getRiskConfig } from '../risk/riskConfig.js';
+import { mapWithConcurrency } from '../../utils/concurrency.js';
 
 const AI_CONFIRM_COOLDOWN_MS = 5 * 60 * 1000; // don't re-confirm the same symbol more than once per 5 min
 const lastConfirmAttempt = new Map(); // symbol -> timestamp
+// Context-building (market data + news + track record) per symbol/underlying is the
+// expensive, fully independent part of a tick — safe to prefetch concurrently ahead of
+// the sequential decision/order-placement pass below (which must stay sequential: it
+// mutates openPositionCount/openSymbols across iterations to enforce maxOpenPositions).
+const CONTEXT_PREFETCH_CONCURRENCY = 5;
 
 /**
  * @param {string} userId @param {string} symbol @param {string} providerKey
@@ -122,7 +128,10 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   if (!systemConfig.autoTradingEnabled) return { ran: false, reason: 'auto-trading disabled in Settings' };
   if (!(await isMarketOpen(userId))) return { ran: false, reason: 'market closed' };
 
-  const settings = await UserSettings.findOne({ userId }).lean();
+  // Not .lean() — a pre-existing UserSettings document created before `watchlist`
+  // existed won't have it in its raw stored data; only a hydrated Mongoose document
+  // applies the schema's watchlist defaults on read.
+  const settings = await UserSettings.findOne({ userId });
   if (!settings?.autoInvest?.enabled) return { ran: false, reason: 'autoInvest disabled' };
 
   // Auto-trading follows whatever broker the user is effectively operating on right
@@ -141,9 +150,23 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   const riskConfig = await getRiskConfig(userId);
   const results = [];
 
-  for (const { symbol } of STOCK_UNIVERSE) {
+  const equityContexts = await mapWithConcurrency(settings.watchlist.equities, CONTEXT_PREFETCH_CONCURRENCY, async (symbol) => {
     try {
-      const ctx = await buildContext(symbol, userId);
+      return await buildContext(symbol, userId);
+    } catch (err) {
+      console.error(`[autoTradingService] buildContext failed for ${symbol}:`, err.message);
+      return null;
+    }
+  });
+  const equityContextBySymbol = new Map(settings.watchlist.equities.map((s, i) => [s, equityContexts[i]]));
+
+  for (const symbol of settings.watchlist.equities) {
+    try {
+      const ctx = equityContextBySymbol.get(symbol);
+      if (!ctx) {
+        results.push({ symbol, status: 'CONTEXT_FETCH_FAILED' });
+        continue;
+      }
       const quantDecision = scoreQuant(symbol, ctx, settings.autoInvest.amountPerTrade, riskConfig.maxLossPerTrade);
 
       if (quantDecision.action === 'WAIT') continue;
@@ -255,13 +278,30 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   // positionGuardianJob/squareOffJob watching the Position's stored stopLoss/target.
   const openUnderlyings = new Set(openPositions.filter((p) => p.segment === 'FNO').map((p) => p.underlying));
 
-  for (const { symbol: underlyingSymbol } of OPTION_UNDERLYINGS) {
+  const optionUnderlyings = settings.watchlist.optionUnderlyings;
+  const optionPrefetch = await mapWithConcurrency(optionUnderlyings, CONTEXT_PREFETCH_CONCURRENCY, async (underlyingSymbol) => {
+    try {
+      const contract = await resolveOptionContract(underlyingSymbol);
+      const ctx = await buildOptionsContext(contract, userId);
+      return { contract, ctx };
+    } catch (err) {
+      console.error(`[autoTradingService] options context prefetch failed for ${underlyingSymbol}:`, err.message);
+      return null;
+    }
+  });
+  const optionPrefetchByUnderlying = new Map(optionUnderlyings.map((s, i) => [s, optionPrefetch[i]]));
+
+  for (const underlyingSymbol of optionUnderlyings) {
     try {
       if (openUnderlyings.has(underlyingSymbol)) continue;
       if (openPositionCount >= settings.autoInvest.maxOpenPositions) continue;
 
-      const contract = await resolveOptionContract(underlyingSymbol);
-      const ctx = await buildOptionsContext(contract, userId);
+      const prefetched = optionPrefetchByUnderlying.get(underlyingSymbol);
+      if (!prefetched) {
+        results.push({ symbol: underlyingSymbol, status: 'CONTEXT_FETCH_FAILED' });
+        continue;
+      }
+      const { contract, ctx } = prefetched;
       const quantDecision = scoreQuantOptions(ctx, settings.autoInvest.amountPerTrade, riskConfig.maxLossPerTrade);
 
       if (quantDecision.action === 'WAIT') continue;

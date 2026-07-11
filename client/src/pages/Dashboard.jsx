@@ -4,7 +4,7 @@ import { useRiskStore } from '../store/useRiskStore.js';
 import { useAIStore } from '../store/useAIStore.js';
 import { useAISignalsStore } from '../store/useAISignalsStore.js';
 import { dashboardService } from '../services/dashboard.service.js';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { PortfolioSummaryBar } from '../components/dashboard/PortfolioSummaryBar.jsx';
 import { EquityCurve } from '../components/dashboard/EquityCurve.jsx';
 import { AIDecisionFeed } from '../components/dashboard/AIDecisionFeed.jsx';
@@ -28,14 +28,11 @@ export function Dashboard() {
   usePolling(fetchRisk, 8000);
   usePolling(() => fetchDecisions({ limit: 15 }), 10000);
   usePolling(fetchSignals, 30000);
-
-  useEffect(() => {
-    dashboardService.equityCurve().then(setEquityCurve);
-  }, [portfolio]);
-
-  useEffect(() => {
-    dashboardService.summary().then((d) => setTrades(d.recentTrades));
-  }, [portfolio]);
+  // Independent polling intervals instead of a `[portfolio]` dependency — that object
+  // gets a new reference on every 5s portfolio poll regardless of whether anything
+  // actually changed, which was re-firing these two network calls every 5s forever.
+  usePolling(() => dashboardService.equityCurve().then(setEquityCurve), 15000);
+  usePolling(() => dashboardService.summary().then((d) => setTrades(d.recentTrades)), 10000);
 
   return (
     <div className="space-y-6">

@@ -5,8 +5,15 @@
  */
 const CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
 
+/** Index spot symbols (as used in OPTION_UNDERLYINGS/NIFTY_INDEX_SYMBOL) need their own Yahoo ticker — everything else is a plain equity, suffixed `.NS`. Verified live against Yahoo's chart API. */
+const INDEX_YAHOO_TICKERS = {
+  'NIFTY 50': '%5ENSEI',
+  'NIFTY BANK': '%5ENSEBANK',
+  'NIFTY FIN SERVICE': '%5ECNXFIN',
+};
+
 function yahooSymbol(symbol) {
-  if (symbol === 'NIFTY 50') return '%5ENSEI';
+  if (INDEX_YAHOO_TICKERS[symbol]) return INDEX_YAHOO_TICKERS[symbol];
   return `${symbol}.NS`;
 }
 

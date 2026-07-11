@@ -11,9 +11,12 @@ function formatExpiry(iso) {
  * exact contract identity (tradingSymbol, strike, expiry, optionType, lotSize, premium)
  * needed to feed the chart/TradePanel and the /orders payload — mirrors StockSelector's
  * flat-pill pattern for underlying/expiry, plus a scrollable strike table for the chain.
- * @param {{selected:object|null, onSelectContract:(contract:object)=>void}} props
+ * Every underlying is always browsable/tradeable (there are only 3) — the star toggle
+ * is purely about whether the AI background scan/auto-trading cron includes it, same
+ * "focus list" concept as StockSelector's add/remove.
+ * @param {{selected:object|null, onSelectContract:(contract:object)=>void, focusUnderlyings?:string[], onToggleFocus?:(symbol:string)=>void}} props
  */
-export function OptionsSelector({ selected, onSelectContract }) {
+export function OptionsSelector({ selected, onSelectContract, focusUnderlyings = [], onToggleFocus }) {
   const [underlyings, setUnderlyings] = useState([]);
   const [underlying, setUnderlying] = useState(null);
   const [expiries, setExpiries] = useState([]);
@@ -58,6 +61,7 @@ export function OptionsSelector({ selected, onSelectContract }) {
     if (!side) return;
     onSelectContract({
       underlying,
+      spotSymbol: underlyings.find((u) => u.symbol === underlying)?.spotSymbol,
       strike: row.strike,
       expiry,
       optionType,
@@ -70,19 +74,32 @@ export function OptionsSelector({ selected, onSelectContract }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        {underlyings.map((u) => (
-          <button
-            key={u.symbol}
-            onClick={() => setUnderlying(u.symbol)}
-            className={`shrink-0 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
-              underlying === u.symbol
-                ? 'border-accent/50 bg-accent/10 text-accent'
-                : 'border-border/70 bg-surface/50 text-text hover:border-accent/30'
-            }`}
-          >
-            {u.name}
-          </button>
-        ))}
+        {underlyings.map((u) => {
+          const isFocused = focusUnderlyings.includes(u.symbol);
+          return (
+            <div key={u.symbol} className="relative">
+              <button
+                onClick={() => setUnderlying(u.symbol)}
+                className={`shrink-0 rounded-xl border px-4 py-2 pr-7 text-sm font-semibold transition-colors ${
+                  underlying === u.symbol
+                    ? 'border-accent/50 bg-accent/10 text-accent'
+                    : 'border-border/70 bg-surface/50 text-text hover:border-accent/30'
+                }`}
+              >
+                {u.name}
+              </button>
+              {onToggleFocus && (
+                <button
+                  onClick={() => onToggleFocus(u.symbol)}
+                  title={isFocused ? `${u.symbol} is in your auto-trading focus list` : `Add ${u.symbol} to your auto-trading focus list`}
+                  className={`absolute right-1.5 top-1.5 text-sm ${isFocused ? 'text-accent' : 'text-muted/50 hover:text-muted'}`}
+                >
+                  {isFocused ? '★' : '☆'}
+                </button>
+              )}
+            </div>
+          );
+        })}
         {spotPrice != null && <span className="self-center text-sm text-muted">Spot: {formatINR(spotPrice)}</span>}
       </div>
 

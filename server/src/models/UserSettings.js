@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { BROKERS, TRADING_MODES, AI_PROVIDERS, MARKET_DATA_PROVIDERS } from '../config/constants.js';
+import { BROKERS, TRADING_MODES, AI_PROVIDERS, MARKET_DATA_PROVIDERS, STOCK_UNIVERSE } from '../config/constants.js';
 import { env } from '../config/env.js';
 
 const UserSettingsSchema = new mongoose.Schema(
@@ -12,6 +12,17 @@ const UserSettingsSchema = new mongoose.Schema(
 
     minInvestment: { type: Number, default: 1000 },
     maxInvestment: { type: Number, default: 20000 },
+
+    // The user's personal FOCUS list — what the AI background scan, auto-trading
+    // cron, and default Trade-page selectors actually iterate. Distinct from the full
+    // browsable universe (all NSE equities via instrumentService.searchEquities, all
+    // OPTION_UNDERLYINGS) — a user can browse/search anything but only trades-on-autopilot
+    // what they've explicitly added here. Defaults preserve pre-watchlist behavior for
+    // an existing install (the original curated 12 stocks + NIFTY).
+    watchlist: {
+      equities: { type: [String], default: () => STOCK_UNIVERSE.map((s) => s.symbol) },
+      optionUnderlyings: { type: [String], default: () => ['NIFTY'] },
+    },
 
     autoInvest: {
       enabled: { type: Boolean, default: false },

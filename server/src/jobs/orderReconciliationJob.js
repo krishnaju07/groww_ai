@@ -2,8 +2,13 @@ import cron from 'node-cron';
 import { Order } from '../models/Order.js';
 import { brokerFor } from '../services/brokers/registry.js';
 import { recordLiveFill } from '../services/orderService.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 
 let running = false;
+// Each candidate order is an independent document/broker call (no shared state across
+// iterations) — safe to check concurrently. Capped so a backlog of unresolved orders
+// doesn't burst-hammer the broker API all at once.
+const RECONCILE_CONCURRENCY = 8;
 // Only reconcile orders old enough that the inline retry (retryFillCheck.js, inside each
 // broker adapter's placeOrder) has already had its full chance to resolve this itself —
 // avoids this job and that inline path racing each other on a just-placed order.
@@ -31,13 +36,12 @@ export async function runOrderReconciliationTick() {
   });
   if (!candidates.length) return { ran: true, results: [] };
 
-  const results = [];
-  for (const order of candidates) {
+  const outcomes = await mapWithConcurrency(candidates, RECONCILE_CONCURRENCY, async (order) => {
     try {
       const broker = brokerFor(order.broker, order.userId);
       const detail = await broker.getOrderStatus(order.brokerOrderId, order.segment ?? 'CASH');
 
-      if (detail.status === order.status) continue; // still unresolved, try again next tick
+      if (detail.status === order.status) return null; // still unresolved, try again next tick
 
       if (detail.status === 'FILLED' && detail.filledPrice) {
         const tradeId = await recordLiveFill(
@@ -60,19 +64,22 @@ export async function runOrderReconciliationTick() {
         order.status = 'FILLED';
         if (tradeId) order.tradeId = tradeId;
         await order.save();
-        results.push({ orderId: String(order._id), symbol: order.symbol, status: 'FILLED_BACKFILLED' });
-      } else if (['CANCELLED', 'REJECTED'].includes(detail.status)) {
+        return { orderId: String(order._id), symbol: order.symbol, status: 'FILLED_BACKFILLED' };
+      }
+      if (['CANCELLED', 'REJECTED'].includes(detail.status)) {
         order.status = detail.status;
         await order.save();
-        results.push({ orderId: String(order._id), symbol: order.symbol, status: detail.status });
+        return { orderId: String(order._id), symbol: order.symbol, status: detail.status };
       }
       // else: still PLACED/PENDING at the broker — genuinely not filled yet, leave as-is.
+      return null;
     } catch (err) {
       console.error(`[orderReconciliationJob] failed for order ${order._id}:`, err.message);
+      return null;
     }
-  }
+  });
 
-  return { ran: true, results };
+  return { ran: true, results: outcomes.filter(Boolean) };
 }
 
 /** Registers the reconciliation tick — runs every 20s. */

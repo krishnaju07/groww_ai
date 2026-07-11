@@ -50,6 +50,43 @@ export async function getInstrument(tradingSymbol) {
 }
 
 /**
+ * Searches the full real NSE equity universe (synced from Groww's instrument CSV —
+ * see instrumentSync.js) by symbol prefix or name substring. This IS "all stocks" —
+ * the browsable universe a user picks their personal watchlist from, distinct from
+ * STOCK_UNIVERSE (just the default seed).
+ * @param {string} query @param {number} [limit]
+ * @returns {Promise<{symbol:string, name:string}[]>}
+ */
+export async function searchEquities(query, limit = 25) {
+  const q = String(query ?? '').trim();
+  if (!q) return [];
+  const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rows = await Instrument.find({
+    segment: 'CASH',
+    instrumentType: 'EQ',
+    $or: [{ tradingSymbol: new RegExp(`^${safe}`, 'i') }, { name: new RegExp(safe, 'i') }],
+  })
+    .limit(limit)
+    .lean();
+  // Symbol-prefix matches (a user typing a ticker) rank above name-substring matches.
+  rows.sort((a, b) => {
+    const aStarts = a.tradingSymbol.toUpperCase().startsWith(q.toUpperCase()) ? 0 : 1;
+    const bStarts = b.tradingSymbol.toUpperCase().startsWith(q.toUpperCase()) ? 0 : 1;
+    return aStarts - bStarts;
+  });
+  return rows.map((r) => ({ symbol: r.tradingSymbol, name: r.name }));
+}
+
+/** @param {string[]} symbols @returns {Promise<Record<string,{name:string}>>} */
+export async function getEquityDetails(symbols) {
+  if (!symbols.length) return {};
+  const rows = await Instrument.find({ segment: 'CASH', instrumentType: 'EQ', tradingSymbol: { $in: symbols } })
+    .select('tradingSymbol name')
+    .lean();
+  return Object.fromEntries(rows.map((r) => [r.tradingSymbol, { name: r.name }]));
+}
+
+/**
  * @param {string} underlyingSymbol @param {Date} expiryDate @param {number} spotPrice
  * @returns {Promise<number|null>} the strike nearest the current spot price (ATM)
  */

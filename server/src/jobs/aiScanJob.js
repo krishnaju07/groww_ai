@@ -1,12 +1,20 @@
 import cron from 'node-cron';
-import { DEFAULT_USER_ID, STOCK_UNIVERSE, OPTION_UNDERLYINGS } from '../config/constants.js';
+import { DEFAULT_USER_ID } from '../config/constants.js';
 import { decide, decideOptions } from '../services/ai/decisionEngine.js';
 import { setSignal } from '../services/ai/signalCache.js';
 import { isMarketOpen } from '../utils/marketHours.js';
 import { getSystemConfig } from '../services/config/systemConfig.js';
+import { UserSettings } from '../models/UserSettings.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 
 /** signalCache is a flat symbol->signal map — namespaced so an option underlying (e.g. 'NIFTY') never collides with an equity symbol of the same name. */
 const optionsSignalKey = (underlyingSymbol) => `OPTIONS:${underlyingSymbol}`;
+
+// This scan is read-only (no shared mutable state across symbols, unlike
+// autoTradingService's order-placement loop) — safe to fan out concurrently. Capped
+// rather than a bare Promise.all so a large watchlist can't burst-hammer the LLM/news
+// APIs all at once.
+const SCAN_CONCURRENCY = 5;
 
 let running = false;
 let lastScanAt = 0;
@@ -22,7 +30,14 @@ let lastScanAt = 0;
 export async function runAiScan(userId = DEFAULT_USER_ID) {
   if (!(await isMarketOpen(userId))) return { ran: false, reason: 'market closed' };
 
-  for (const { symbol } of STOCK_UNIVERSE) {
+  // Not .lean() — a pre-existing UserSettings document created before `watchlist`
+  // existed won't have it in its raw stored data; only a hydrated Mongoose document
+  // (not a lean plain object) applies the schema's watchlist defaults on read.
+  const settings = await UserSettings.findOne({ userId });
+  const equities = settings?.watchlist?.equities ?? [];
+  const optionUnderlyings = settings?.watchlist?.optionUnderlyings ?? [];
+
+  await mapWithConcurrency(equities, SCAN_CONCURRENCY, async (symbol) => {
     try {
       const decision = await decide(userId, symbol);
       setSignal(symbol, {
@@ -35,9 +50,9 @@ export async function runAiScan(userId = DEFAULT_USER_ID) {
     } catch (err) {
       console.error(`[aiScanJob] scan failed for ${symbol}:`, err.message);
     }
-  }
+  });
 
-  for (const { symbol } of OPTION_UNDERLYINGS) {
+  await mapWithConcurrency(optionUnderlyings, SCAN_CONCURRENCY, async (symbol) => {
     try {
       const decision = await decideOptions(userId, symbol);
       setSignal(optionsSignalKey(symbol), {
@@ -51,7 +66,7 @@ export async function runAiScan(userId = DEFAULT_USER_ID) {
     } catch (err) {
       console.error(`[aiScanJob] options scan failed for ${symbol}:`, err.message);
     }
-  }
+  });
 
   return { ran: true };
 }

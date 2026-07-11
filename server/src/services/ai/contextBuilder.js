@@ -5,6 +5,7 @@ import { getNiftySentiment } from './niftySentimentService.js';
 import { getSectorContext } from './sectorContext.js';
 import { getNewsForSymbol } from './newsService.js';
 import { getTrackRecord, getOptionsTrackRecord } from './trackRecordService.js';
+import { getEquityDetails } from '../instruments/instrumentService.js';
 import { getIntradaySessionContext } from '../../utils/marketHours.js';
 import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../../config/constants.js';
 
@@ -21,7 +22,11 @@ import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../../config/constants.js';
  * @returns {Promise<import('../../types.js').IndicatorSnapshot>}
  */
 export async function buildContext(symbol, userId = DEFAULT_USER_ID) {
-  const companyName = STOCK_UNIVERSE.find((s) => s.symbol === symbol)?.name ?? symbol;
+  // The curated seed list has a hand-picked name; anything else (the wider real
+  // equity universe — see instrumentService.searchEquities) is resolved from the
+  // synced Instrument record, falling back to the bare symbol if that lookup misses.
+  const seedName = STOCK_UNIVERSE.find((s) => s.symbol === symbol)?.name;
+  const companyName = seedName ?? (await getEquityDetails([symbol]))[symbol]?.name ?? symbol;
 
   const [ltp, candles5m, candles15m, candles30m, niftySentiment, sectorContext, news, trackRecord] = await Promise.all([
     marketData.getLTP(symbol),
@@ -139,25 +144,25 @@ export async function buildOptionsContext(contract, userId = DEFAULT_USER_ID) {
  * @returns {Promise<{tradingSymbol:string, premium:number, premiumAtr:number, trackRecord:object}>}
  */
 async function buildOptionSide(contract, underlying, optionType, userId) {
-  const [premium, trackRecord] = await Promise.all([
+  const [premium, trackRecord, premiumCandles] = await Promise.all([
     marketData.getLTP(contract.tradingSymbol, 'FNO'),
     getOptionsTrackRecord(userId, underlying, optionType).catch((err) => {
       console.error(`[contextBuilder] options track record lookup failed for ${underlying} ${optionType}:`, err.message);
       return { totalClosed: 0, winRate: null, avgPnl: null };
     }),
+    marketData.getCandles(contract.growwSymbol, '5m', 100, 'FNO').catch((err) => {
+      console.error(`[contextBuilder] premium candle fetch failed for ${contract.tradingSymbol}, premiumAtr falls back to 0:`, err.message);
+      return [];
+    }),
   ]);
 
-  let premiumAtr = 0;
-  try {
-    const premiumCandles = await marketData.getCandles(contract.growwSymbol, '5m', 100, 'FNO');
-    premiumAtr = atr({
-      high: premiumCandles.map((c) => c.high),
-      low: premiumCandles.map((c) => c.low),
-      close: premiumCandles.map((c) => c.close),
-    });
-  } catch (err) {
-    console.error(`[contextBuilder] premium candle fetch failed for ${contract.tradingSymbol}, premiumAtr falls back to 0:`, err.message);
-  }
+  const premiumAtr = premiumCandles.length
+    ? atr({
+        high: premiumCandles.map((c) => c.high),
+        low: premiumCandles.map((c) => c.low),
+        close: premiumCandles.map((c) => c.close),
+      })
+    : 0;
 
   return { tradingSymbol: contract.tradingSymbol, premium, premiumAtr, trackRecord };
 }

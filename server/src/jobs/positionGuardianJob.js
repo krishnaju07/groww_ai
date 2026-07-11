@@ -8,8 +8,13 @@ import { brokerFor } from '../services/brokers/registry.js';
 import { placeOrder, recordLiveFill } from '../services/orderService.js';
 import { isMarketOpen } from '../utils/marketHours.js';
 import { round2, applyPercent } from '../utils/format.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 
 let running = false;
+// Each position is independent (its own symbol/broker call/order) — safe to check
+// concurrently. Capped defensively; in practice a user's open-position count is small
+// (bounded by maxOpenPositions).
+const GUARDIAN_CONCURRENCY = 10;
 
 /**
  * Closes the single biggest gap in this platform's "sit and watch" premise: every
@@ -53,9 +58,7 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
     console.error('[positionGuardianJob] market data unavailable, skipping tick:', err.message);
     return { ran: false, reason: `market data unavailable: ${err.message}` };
   }
-  const results = [];
-
-  for (const position of positions) {
+  const outcomes = await mapWithConcurrency(positions, GUARDIAN_CONCURRENCY, async (position) => {
     try {
       // Broker-side OCO/GTT reconciliation: if the protective order already executed at
       // the broker before this tick got to it (server was down, or the broker's own
@@ -92,13 +95,12 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
             },
             { status: 'FILLED', filledPrice: approxFillPrice, filledQuantity: position.quantity },
           );
-          results.push({ symbol: position.symbol, status: 'CLOSED_BY_BROKER_OCO', tradeId: tradeId ? String(tradeId) : null });
-          continue;
+          return { symbol: position.symbol, status: 'CLOSED_BY_BROKER_OCO', tradeId: tradeId ? String(tradeId) : null };
         }
       }
 
       const ltp = ltps[position.symbol];
-      if (!Number.isFinite(ltp)) continue;
+      if (!Number.isFinite(ltp)) return null;
 
       // Ratchet highestPriceSeen up as price makes new highs — needed both for the
       // trailing-stop calc below and so the field stays meaningful even when trailing
@@ -127,7 +129,7 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
       if (stopLoss != null && ltp <= stopLoss) triggerReason = `Stop-loss hit (LTP ₹${ltp} <= ₹${stopLoss})`;
       else if (target != null && ltp >= target) triggerReason = `Target hit (LTP ₹${ltp} >= ₹${target})`;
 
-      if (!triggerReason) continue;
+      if (!triggerReason) return null;
 
       const order = await placeOrder(userId, {
         symbol: position.symbol,
@@ -137,14 +139,14 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
         triggerReason,
         segment: position.segment ?? 'CASH',
       });
-      results.push({ symbol: position.symbol, status: order.status, reason: triggerReason });
+      return { symbol: position.symbol, status: order.status, reason: triggerReason };
     } catch (err) {
       console.error(`[positionGuardianJob] failed for ${position.symbol}:`, err.message);
-      results.push({ symbol: position.symbol, status: 'FAILED', reason: err.message });
+      return { symbol: position.symbol, status: 'FAILED', reason: err.message };
     }
-  }
+  });
 
-  return { ran: true, results };
+  return { ran: true, results: outcomes.filter(Boolean) };
 }
 
 /** Registers the 15s intraday stop-loss/target/trailing-stop tick. */

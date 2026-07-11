@@ -1,6 +1,13 @@
 export const DEFAULT_USER_ID = 'default-user';
 
-/** Curated NSE universe the app tracks/trades. Symbols are NSE trading symbols (no exchange suffix). `sector` powers sector-relative-strength context for the AI decision engine (sectorContext.js). */
+/**
+ * Curated seed list — the default watchlist a brand-new user starts with (see
+ * UserSettings.watchlist.equities). The actual browsable/tradeable stock universe is
+ * the full real NSE equity list synced from Groww's instrument CSV (~2,300+ stocks,
+ * see instrumentSync.js/instrumentService.searchEquities) — this list ONLY seeds
+ * defaults and provides `sector` for sectorContext.js's relative-strength calc (any
+ * stock outside this list falls back to sector 'Other', see sectorContext.js).
+ */
 export const STOCK_UNIVERSE = [
   { symbol: 'RELIANCE', name: 'Reliance Industries', exchange: 'NSE', segment: 'CASH', sector: 'Energy' },
   { symbol: 'TCS', name: 'Tata Consultancy Services', exchange: 'NSE', segment: 'CASH', sector: 'IT' },
@@ -19,14 +26,23 @@ export const STOCK_UNIVERSE = [
 export const NIFTY_INDEX_SYMBOL = 'NIFTY 50';
 
 /**
- * Index underlyings this platform trades options on. `spotSymbol` is the bare
- * equity/index symbol used to fetch underlying-index technicals (contextBuilder
- * reuses the existing equity indicator pipeline against this); `growwUnderlyingSymbol`
+ * The full browsable/tradeable index-options universe (verified against Groww's real
+ * instrument CSV and each spot symbol's live data source — see YahooFinanceProvider's
+ * yahooSymbol() map). A user's actual auto-trading FOCUS is a subset of this, stored in
+ * UserSettings.watchlist.optionUnderlyings (default: just NIFTY) — this constant is the
+ * complete set they can choose from, not what gets auto-scanned.
+ * `spotSymbol` is the underlying index symbol used to fetch its own technicals
+ * (contextBuilder reuses the equity indicator pipeline against this); `growwUnderlyingSymbol`
  * is the `underlying_symbol` value used to filter Groww's instrument CSV for this
  * underlying's option chain (see instrumentSync.js / instrumentService.js).
+ * Index F&O also exists for MIDCPNIFTY/NIFTYNXT50/SENSEX/BANKEX on Groww's instrument
+ * master, but they're left out here until their spot-data source (Yahoo ticker or
+ * equivalent) is verified — adding one is just adding another entry below.
  */
 export const OPTION_UNDERLYINGS = [
   { symbol: 'NIFTY', name: 'Nifty 50', growwUnderlyingSymbol: 'NIFTY', spotSymbol: 'NIFTY 50' },
+  { symbol: 'BANKNIFTY', name: 'Bank Nifty', growwUnderlyingSymbol: 'BANKNIFTY', spotSymbol: 'NIFTY BANK' },
+  { symbol: 'FINNIFTY', name: 'Nifty Financial Services', growwUnderlyingSymbol: 'FINNIFTY', spotSymbol: 'NIFTY FIN SERVICE' },
 ];
 
 export const OPTION_TYPES = /** @type {const} */ (['CE', 'PE']);

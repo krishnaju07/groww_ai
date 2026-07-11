@@ -30,6 +30,22 @@ const CANDLE_TTL_MS = 15_000;
 const ltpCache = new Map(); // symbol -> {value, at}
 const candleCache = new Map(); // `${symbol}:${interval}:${limit}` -> {value, at}
 
+// Neither cache above ever evicts on its own — a TTL only governs whether a HIT is
+// still fresh, not whether a stale entry gets removed. With the real equity/option
+// universe now in the thousands (see instrumentSync.js), every distinct symbol/segment
+// ever looked up (search previews, one-off "Ask AI" calls, etc.) would otherwise sit in
+// memory forever. Sweep out anything past its TTL periodically instead.
+const CACHE_SWEEP_INTERVAL_MS = 60_000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of ltpCache) {
+    if (now - entry.at >= LTP_TTL_MS) ltpCache.delete(key);
+  }
+  for (const [key, entry] of candleCache) {
+    if (now - entry.at >= CANDLE_TTL_MS) candleCache.delete(key);
+  }
+}, CACHE_SWEEP_INTERVAL_MS).unref();
+
 // Tracks the last time the configured (non-mock) provider actually failed and got
 // silently swapped for fake data — this is what powers the "market data degraded"
 // warning banner. Without this, a provider outage (e.g. an API losing access, rate
