@@ -4,6 +4,7 @@ import { decide, decideOptions } from '../services/ai/decisionEngine.js';
 import { AIDecisionLog } from '../models/AIDecisionLog.js';
 import { Trade } from '../models/Trade.js';
 import { getAllSignals } from '../services/ai/signalCache.js';
+import { getMarketRegime } from '../services/ai/regimeService.js';
 import { OPTION_UNDERLYINGS } from '../config/constants.js';
 import { getEquityDetails } from '../services/instruments/instrumentService.js';
 import { round2 } from '../utils/format.js';
@@ -61,6 +62,14 @@ aiRoutes.get(
   '/signals',
   asyncHandler(async (req, res) => {
     res.json({ success: true, data: getAllSignals() });
+  }),
+);
+
+/** Current broad-market (NIFTY) regime classification — powers the dashboard "market regime" indicator and gates auto-entries. */
+aiRoutes.get(
+  '/regime',
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await getMarketRegime() });
   }),
 );
 

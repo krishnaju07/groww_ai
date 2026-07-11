@@ -25,6 +25,10 @@ const PositionSchema = new mongoose.Schema(
     // Set once after entry, cleared implicitly when the position itself is deleted (closed).
     smartOrderId: { type: String, default: null },
     smartOrderType: { type: String, default: null },
+    // Richer-exit bookkeeping (positionGuardianJob) — once-only flags so a partial book
+    // or a move-to-cost isn't repeated every 15s tick.
+    slMovedToCost: { type: Boolean, default: false },
+    partialBooked: { type: Boolean, default: false },
     aiDecisionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AIDecisionLog', default: null },
     openedAt: { type: Date, default: Date.now },
   },

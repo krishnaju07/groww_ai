@@ -110,6 +110,9 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
         await Position.updateOne({ _id: position._id }, { $max: { highestPriceSeen: ltp } });
       }
 
+      // Current unrealized profit % vs entry — drives all the richer-exit rules below.
+      const profitPercent = position.avgBuyPrice > 0 ? ((ltp - position.avgBuyPrice) / position.avgBuyPrice) * 100 : 0;
+
       // A position without an explicit stopLoss/target (e.g. a manual order placed with
       // none) falls back to the global autoExit percent config, if enabled — this is what
       // actually makes those long-dormant settings do something.
@@ -123,11 +126,52 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
           // Trailing only ever tightens the stop (locks in more gain), never loosens it.
           stopLoss = stopLoss == null ? trailingStop : Math.max(stopLoss, trailingStop);
         }
+
+        // Move stop to cost (breakeven) once up enough — a winner can't become a loser after this.
+        if (autoExit.moveSlToCostAtPercent > 0 && !position.slMovedToCost && profitPercent >= autoExit.moveSlToCostAtPercent) {
+          const breakeven = round2(position.avgBuyPrice);
+          stopLoss = stopLoss == null ? breakeven : Math.max(stopLoss, breakeven);
+          position.slMovedToCost = true;
+          position.stopLoss = stopLoss;
+          await Position.updateOne({ _id: position._id }, { $set: { slMovedToCost: true, stopLoss } });
+        }
+      }
+
+      // Partial book — take part of the position at a first target, let the rest run.
+      // Fires once (partialBooked flag), needs at least 2 units to split.
+      if (
+        autoExit.enabled &&
+        autoExit.partialBookAtPercent > 0 &&
+        !position.partialBooked &&
+        profitPercent >= autoExit.partialBookAtPercent &&
+        position.quantity > 1
+      ) {
+        const bookQty = Math.max(1, Math.floor(position.quantity * (autoExit.partialBookFraction ?? 0.5)));
+        if (bookQty < position.quantity) {
+          await Position.updateOne({ _id: position._id }, { $set: { partialBooked: true } });
+          const order = await placeOrder(userId, {
+            symbol: position.symbol,
+            action: 'SELL',
+            quantity: bookQty,
+            source: 'automatic',
+            triggerReason: `Partial book — up ${profitPercent.toFixed(1)}%, booking ${bookQty}/${position.quantity}, letting the rest run`,
+            segment: position.segment ?? 'CASH',
+          });
+          return { symbol: position.symbol, status: order.status, reason: 'PARTIAL_BOOK' };
+        }
       }
 
       let triggerReason = null;
       if (stopLoss != null && ltp <= stopLoss) triggerReason = `Stop-loss hit (LTP ₹${ltp} <= ₹${stopLoss})`;
       else if (target != null && ltp >= target) triggerReason = `Target hit (LTP ₹${ltp} >= ₹${target})`;
+      else if (autoExit.enabled && autoExit.maxHoldMinutes > 0) {
+        // Time-based exit — a position that's gone nowhere ties up capital and risk budget.
+        // Only fires when it's NOT meaningfully in profit (a winner is left to run/trail).
+        const heldMin = (Date.now() - new Date(position.openedAt).getTime()) / 60000;
+        if (heldMin >= autoExit.maxHoldMinutes && profitPercent < (autoExit.moveSlToCostAtPercent || 1)) {
+          triggerReason = `Time exit — held ${Math.round(heldMin)} min with no follow-through (${profitPercent.toFixed(1)}%)`;
+        }
+      }
 
       if (!triggerReason) return null;
 

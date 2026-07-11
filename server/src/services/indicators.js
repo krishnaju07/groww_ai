@@ -1,4 +1,4 @@
-import { RSI, MACD, SMA, PSAR, ATR } from 'technicalindicators';
+import { RSI, MACD, SMA, PSAR, ATR, ADX } from 'technicalindicators';
 import { INDICATOR_CONFIG } from '../config/constants.js';
 import { round2 } from '../utils/format.js';
 
@@ -88,6 +88,20 @@ export function atr({ high, low, close }, period = SUPERTREND_PERIOD) {
   const values = ATR.calculate({ high, low, close, period });
   const last = values.at(-1);
   return last != null ? round2(last) : 0;
+}
+
+/**
+ * Average Directional Index — measures TREND STRENGTH (not direction). ~0-100:
+ * <20 = no real trend (range/chop), 20-25 = emerging, >25 = strong trend. Used by the
+ * regime classifier (regimeService.js) to distinguish a tradeable directional market
+ * from a choppy one that should be sat out. Returns 0 when there's not enough history.
+ * @param {{high:number[], low:number[], close:number[]}} ohlc @param {number} [period]
+ * @returns {number}
+ */
+export function adx({ high, low, close }, period = 14) {
+  const values = ADX.calculate({ high, low, close, period });
+  const last = values.at(-1);
+  return last?.adx != null ? round2(last.adx) : 0;
 }
 
 /**

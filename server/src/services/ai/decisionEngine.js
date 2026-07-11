@@ -228,6 +228,17 @@ const PROVIDERS = {
   perplexity: perplexityProvider.equity,
 };
 
+/**
+ * Provider keys that are actually usable right now (LLM master switch on AND an API key
+ * configured) — the roster the consensus engine polls. Order is stable for deterministic
+ * vote display.
+ * @returns {string[]}
+ */
+export function getEnabledProviderKeys() {
+  if (!env.AI_LLM_ENABLED) return [];
+  return Object.keys(PROVIDERS).filter((k) => PROVIDERS[k].enabledFlag());
+}
+
 const OPTIONS_PROVIDERS = {
   claude: { label: 'Claude', call: callClaudeOptions, enabledFlag: () => Boolean(env.ANTHROPIC_API_KEY), defaultModel: env.AI_MODEL },
   openai: openaiProvider.options,
@@ -422,6 +433,9 @@ export async function decideOptions(userId, underlyingSymbol) {
     target: primary.target || null,
     reason: primary.reason,
     confidence: primary.confidence,
+    // The opportunity score is always the Quant scanner's — the LLM refines direction/
+    // sizing but the 0-100 setup-quality rank is the deterministic scanner's output.
+    opportunityScore: quant.opportunityScore ?? null,
     justification: primary.justification ?? '',
     scoreBreakdown: primary.scoreBreakdown ?? undefined,
     models,
@@ -430,6 +444,7 @@ export async function decideOptions(userId, underlyingSymbol) {
 
   return {
     ...primary,
+    opportunityScore: quant.opportunityScore ?? null,
     decisionId: String(log._id),
     models,
     indicatorsSnapshot: ctx,

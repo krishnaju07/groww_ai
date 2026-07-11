@@ -12,6 +12,7 @@ import { riskRoutes } from './risk.routes.js';
 import { aiRoutes } from './ai.routes.js';
 import { brokersRoutes } from './brokers.routes.js';
 import { backtestRoutes } from './backtest.routes.js';
+import { reportsRoutes } from './reports.routes.js';
 
 export const apiRoutes = Router();
 
@@ -28,3 +29,4 @@ apiRoutes.use('/risk', riskRoutes);
 apiRoutes.use('/ai', aiRoutes);
 apiRoutes.use('/brokers', brokersRoutes);
 apiRoutes.use('/backtest', backtestRoutes);
+apiRoutes.use('/reports', reportsRoutes);

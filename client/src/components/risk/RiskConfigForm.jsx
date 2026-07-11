@@ -21,12 +21,16 @@ export function RiskConfigForm({ config, onSave }) {
         maxTradesPerDay: form.maxTradesPerDay,
         maxCapitalPerTradePercent: form.maxCapitalPerTradePercent,
         dailyProfitLockPercent: form.dailyProfitLockPercent,
+        dailyProfitTarget: form.dailyProfitTarget,
+        maxConsecutiveLosses: form.maxConsecutiveLosses,
       });
       toast.success('Risk config updated');
     } catch (err) {
       toast.error(err.message);
     }
   }
+
+  const PROFIT_TARGET_PRESETS = [500, 1000, 2000, 5000];
 
   return (
     <Card>
@@ -58,6 +62,39 @@ export function RiskConfigForm({ config, onSave }) {
             onChange={(e) => setForm((f) => ({ ...f, maxCapitalPerTradePercent: parseFloat(e.target.value) || 0 }))}
           />
         </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-xs font-medium text-muted">Daily profit target (₹, 0 = off)</label>
+          <div className="flex flex-wrap items-center gap-2">
+            <INRInput value={form.dailyProfitTarget ?? 0} onChange={(v) => setForm((f) => ({ ...f, dailyProfitTarget: v }))} />
+            {PROFIT_TARGET_PRESETS.map((amt) => (
+              <button
+                key={amt}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, dailyProfitTarget: amt }))}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  form.dailyProfitTarget === amt ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border/70 text-muted hover:border-border'
+                }`}
+              >
+                ₹{amt}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            The Golden Rule stop — once today's realized profit reaches this, new entries stop for the day (no greed).
+            Open positions are still managed to close. Takes precedence over the % lock below.
+          </p>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Stop after N consecutive losses (0 = off)</label>
+          <input
+            type="number"
+            min={0}
+            className={INPUT}
+            value={form.maxConsecutiveLosses ?? 0}
+            onChange={(e) => setForm((f) => ({ ...f, maxConsecutiveLosses: parseInt(e.target.value, 10) || 0 }))}
+          />
+          <p className="mt-1 text-xs text-muted">No revenge trading — pause new entries after this many losses in a row today.</p>
+        </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-muted">Daily profit lock (% of capital, 0 = off)</label>
           <input
@@ -66,7 +103,7 @@ export function RiskConfigForm({ config, onSave }) {
             value={form.dailyProfitLockPercent ?? 0}
             onChange={(e) => setForm((f) => ({ ...f, dailyProfitLockPercent: parseFloat(e.target.value) || 0 }))}
           />
-          <p className="mt-1 text-xs text-muted">Once today's realized profit hits this %, new entries pause — open positions can still be closed.</p>
+          <p className="mt-1 text-xs text-muted">Secondary % cap — used only if the ₹ target above is off (0).</p>
         </div>
       </div>
       <button onClick={save} className={`${BTN_PRIMARY} mt-4`}>

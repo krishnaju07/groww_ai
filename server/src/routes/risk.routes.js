@@ -23,6 +23,8 @@ const RiskConfigPatchSchema = z.object({
   maxTradesPerDay: z.coerce.number().int().positive().optional(),
   maxCapitalPerTradePercent: z.coerce.number().positive().max(100).optional(),
   dailyProfitLockPercent: z.coerce.number().min(0).max(100).optional(),
+  dailyProfitTarget: z.coerce.number().min(0).optional(),
+  maxConsecutiveLosses: z.coerce.number().int().min(0).optional(),
 });
 
 riskRoutes.put(

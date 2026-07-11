@@ -254,11 +254,31 @@ export function buildOptionsUserContent(ctx) {
       ? `${label} AI-decision track record: ${side.trackRecord.totalClosed} closed trade(s), ${side.trackRecord.winRate}% win rate, avg P&L ₹${side.trackRecord.avgPnl}/trade.`
       : `${label} AI-decision track record: no closed trades yet — treat as neutral (50).`;
 
+  // Greeks (Black-Scholes from premium, or Groww when live) let the model reason about
+  // decay/exposure explicitly. Absent when a premium can't be solved (e.g. no live data).
+  const greekLine = (side, label) =>
+    side.greeks
+      ? `${label} greeks: delta ${side.greeks.delta}, theta ₹${side.greeks.theta}/day, vega ${side.greeks.vega}, IV ${side.greeks.iv}%`
+      : `${label} greeks: unavailable (no premium/data to derive).`;
+
+  const regimeLine = ctx.regime
+    ? `Market regime: ${ctx.regime.regime} (${ctx.regime.tradeable ? 'tradeable' : 'STAND ASIDE'}) — ${ctx.regime.reason}`
+    : 'Market regime: unknown.';
+
+  // Chain intelligence only present when the F&O data feed is live (see optionChainIntelligence.js).
+  const chainLine = ctx.chainIntel?.available
+    ? `Option-chain: PCR ${ctx.chainIntel.pcr}, Max Pain ${ctx.chainIntel.maxPain}, OI resistance ${ctx.chainIntel.resistanceStrike}, OI support ${ctx.chainIntel.supportStrike}. ${ctx.chainIntel.biasNote}`
+    : 'Option-chain intelligence (OI/PCR/max-pain): unavailable (live F&O data feed not active).';
+
   return [
     `Underlying: ${ctx.underlying} | Strike: ${ctx.strike} | Expiry: ${new Date(ctx.expiry).toISOString().slice(0, 10)} | Lot size: ${ctx.lotSize}`,
     `Underlying index price: ₹${ctx.spotLtp}`,
+    regimeLine,
     `CALL (CE) premium: ₹${ctx.ce.premium} | premiumAtr: ${ctx.ce.premiumAtr > 0 ? ctx.ce.premiumAtr : 'not enough history yet — use ~30%/60% of premium fallback'}`,
+    greekLine(ctx.ce, 'CE'),
     `PUT (PE) premium: ₹${ctx.pe.premium} | premiumAtr: ${ctx.pe.premiumAtr > 0 ? ctx.pe.premiumAtr : 'not enough history yet — use ~30%/60% of premium fallback'}`,
+    greekLine(ctx.pe, 'PE'),
+    chainLine,
     `RSI(14) on underlying: ${ctx.rsi}`,
     `MACD (underlying): macd=${ctx.macd.macd} signal=${ctx.macd.signal} histogram=${ctx.macd.histogram}`,
     `Volume vs 20-period average (underlying): ${ctx.volumeRatio}x`,

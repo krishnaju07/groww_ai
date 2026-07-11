@@ -6,6 +6,8 @@ import { getSectorContext } from './sectorContext.js';
 import { getNewsForSymbol } from './newsService.js';
 import { getTrackRecord, getOptionsTrackRecord } from './trackRecordService.js';
 import { getEquityDetails } from '../instruments/instrumentService.js';
+import { getMarketRegime } from './regimeService.js';
+import { greeks as bsGreeks, impliedVol, yearsToExpiry } from './optionGreeks.js';
 import { getIntradaySessionContext } from '../../utils/marketHours.js';
 import { getSystemConfig } from '../config/systemConfig.js';
 import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../../config/constants.js';
@@ -98,7 +100,7 @@ export async function buildOptionsContext(contract, userId = DEFAULT_USER_ID) {
   const { underlying, spotSymbol, strike, expiry, lotSize, ce, pe } = contract;
   const systemConfig = await getSystemConfig(userId);
 
-  const [spotCandles5m, spotCandles15m, spotCandles30m, niftySentiment, news, ceSide, peSide] = await Promise.all([
+  const [spotCandles5m, spotCandles15m, spotCandles30m, niftySentiment, news, ceSide, peSide, regime] = await Promise.all([
     marketData.getCandles(spotSymbol, '5m', 100),
     marketData.getCandles(spotSymbol, '15m', 100),
     marketData.getCandles(spotSymbol, '30m', 100),
@@ -109,6 +111,7 @@ export async function buildOptionsContext(contract, userId = DEFAULT_USER_ID) {
     }),
     buildOptionSide(ce, underlying, 'CE', userId),
     buildOptionSide(pe, underlying, 'PE', userId),
+    getMarketRegime().catch(() => null),
   ]);
 
   const closes5m = spotCandles5m.map((c) => c.close);
@@ -118,13 +121,20 @@ export async function buildOptionsContext(contract, userId = DEFAULT_USER_ID) {
   const lows5m = spotCandles5m.map((c) => c.low);
   const volumes = spotCandles5m.map((c) => c.volume);
   const ohlc5m = { high: highs5m, low: lows5m, close: closes5m };
+  const spotLtp = closes5m.at(-1) ?? 0;
+
+  // Greeks per side — Black-Scholes from the premium already fetched (no extra API call,
+  // works today). `greeks` is null when the premium/IV can't be solved (e.g. no premium).
+  ceSide.greeks = computeSideGreeks(ceSide.premium, 'CE', spotLtp, strike, expiry);
+  peSide.greeks = computeSideGreeks(peSide.premium, 'PE', spotLtp, strike, expiry);
 
   return {
     underlying,
     strike,
     expiry,
     lotSize,
-    spotLtp: closes5m.at(-1) ?? 0,
+    spotLtp,
+    regime,
     ce: ceSide,
     pe: peSide,
     rsi: rsi(closes5m),
@@ -170,4 +180,20 @@ async function buildOptionSide(contract, underlying, optionType, userId) {
     : 0;
 
   return { tradingSymbol: contract.tradingSymbol, premium, premiumAtr, trackRecord };
+}
+
+/**
+ * Black-Scholes greeks for one option side, IV solved from its market premium. Pure
+ * compute on data already in hand — no extra API call. Returns null when it can't be
+ * derived (no/zero premium, expiry passed, or premium below intrinsic).
+ * @param {number|null} premium @param {'CE'|'PE'} optionType @param {number} spot @param {number} strike @param {Date} expiry
+ * @returns {{delta:number, gamma:number, theta:number, vega:number, iv:number}|null}
+ */
+function computeSideGreeks(premium, optionType, spot, strike, expiry) {
+  if (!Number.isFinite(premium) || premium <= 0 || !Number.isFinite(spot) || spot <= 0) return null;
+  const T = yearsToExpiry(expiry);
+  const iv = impliedVol(optionType, premium, spot, strike, T);
+  if (iv == null) return null;
+  const g = bsGreeks(optionType, spot, strike, T, iv);
+  return { ...g, iv: Math.round(iv * 10000) / 100 };
 }

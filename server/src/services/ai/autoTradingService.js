@@ -16,11 +16,14 @@ import { AIDecisionLog } from '../../models/AIDecisionLog.js';
 import { buildContext, buildOptionsContext } from './contextBuilder.js';
 import { scoreQuant, scoreQuantOptions } from './aiSignalService.js';
 import { callProvider, callProviderOptions, resolveOptionContract } from './decisionEngine.js';
+import { runConsensus } from './consensusService.js';
 import { placeOrder } from '../orderService.js';
 import { effectiveMode } from '../brokers/tradingModeService.js';
-import { isMarketOpen } from '../../utils/marketHours.js';
+import { isMarketOpen, getAutoTradeWindowStatus, istDateKey } from '../../utils/marketHours.js';
 import { getSystemConfig } from '../config/systemConfig.js';
 import { getRiskConfig } from '../risk/riskConfig.js';
+import { getNearestExpiry } from '../instruments/instrumentService.js';
+import { getMarketRegime } from './regimeService.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 
 const AI_CONFIRM_COOLDOWN_MS = 5 * 60 * 1000; // don't re-confirm the same symbol more than once per 5 min
@@ -38,7 +41,28 @@ const CONTEXT_PREFETCH_CONCURRENCY = 5;
  * @param {string} [modelOverride] UserSettings.aiModel — falls back to the provider's env-configured default when empty
  * @returns {Promise<{agreed:boolean, log:object}>}
  */
-async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx, modelOverride) {
+async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx, modelOverride, consensus) {
+  // Consensus mode — poll every configured LLM and require N to agree with Quant.
+  if (consensus?.enabled) {
+    const c = await runConsensus({ mode: 'equity', symbol, ctx, quantDecision, aiModel: modelOverride, minAgree: consensus.minAgree });
+    const log = await AIDecisionLog.create({
+      userId,
+      symbol,
+      action: c.agreed ? quantDecision.action : 'WAIT',
+      quantity: c.agreed ? quantDecision.quantity : 0,
+      stopLoss: c.agreed ? quantDecision.stopLoss : null,
+      target: c.agreed ? quantDecision.target : null,
+      reason: c.reason,
+      confidence: c.agreed ? c.confidence : 0,
+      models: [
+        { name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence },
+        ...c.votes.filter((v) => v.ok).map((v) => ({ name: v.provider, model: v.model, action: v.action, confidence: v.confidence })),
+      ],
+      indicatorsSnapshot: ctx,
+    });
+    return { agreed: c.agreed, log };
+  }
+
   let llm = null;
   let llmError = null;
   try {
@@ -82,7 +106,38 @@ async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx, m
  * @param {string} [modelOverride] UserSettings.aiModel — falls back to the provider's env-configured default when empty
  * @returns {Promise<{agreed:boolean, log:object}>}
  */
-async function confirmOptionsWithLlm(userId, underlyingSymbol, contract, providerKey, quantDecision, ctx, modelOverride) {
+async function confirmOptionsWithLlm(userId, underlyingSymbol, contract, providerKey, quantDecision, ctx, modelOverride, consensus) {
+  // Consensus mode — poll every configured LLM; agreement requires backing both the BUY
+  // and the SAME side (CE/PE) as Quant (runConsensus keys options agreement on optionType).
+  if (consensus?.enabled) {
+    const c = await runConsensus({ mode: 'options', ctx, quantDecision, aiModel: modelOverride, minAgree: consensus.minAgree });
+    const optType = c.agreed ? quantDecision.optionType : null;
+    const tSym = optType ? contract[optType.toLowerCase()].tradingSymbol : null;
+    const log = await AIDecisionLog.create({
+      userId,
+      symbol: tSym ?? `${contract.underlying}-${contract.strike}`,
+      segment: 'FNO',
+      underlying: contract.underlying,
+      strike: contract.strike,
+      expiry: contract.expiry,
+      optionType: optType,
+      lotSize: contract.lotSize,
+      action: c.agreed ? quantDecision.action : 'WAIT',
+      quantity: c.agreed ? quantDecision.quantity : 0,
+      stopLoss: c.agreed ? quantDecision.stopLoss : null,
+      target: c.agreed ? quantDecision.target : null,
+      reason: c.reason,
+      confidence: c.agreed ? c.confidence : 0,
+      opportunityScore: quantDecision.opportunityScore ?? null,
+      models: [
+        { name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence },
+        ...c.votes.filter((v) => v.ok).map((v) => ({ name: v.provider, model: v.model, action: v.action, confidence: v.confidence })),
+      ],
+      indicatorsSnapshot: ctx,
+    });
+    return { agreed: c.agreed, log };
+  }
+
   let llm = null;
   let llmError = null;
   try {
@@ -152,6 +207,22 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   const riskConfig = await getRiskConfig(userId);
   const results = [];
 
+  // Time-of-day discipline — gates only fresh ENTRIES (never exits). Computed once per
+  // tick; the equity loop checks it per-BUY, the options loop (all fresh entries) up front.
+  const windowStatus = getAutoTradeWindowStatus(settings.systemConfig);
+
+  // Market-regime gate — "classify before trading; sit out choppy/undecided markets."
+  // Fresh entries require a tradeable broad-market regime when the filter is enabled.
+  // Folded into windowStatus so both the equity per-BUY check and the options up-front
+  // check enforce it with one code path. Exits are unaffected (they don't read this).
+  if (settings.systemConfig?.regimeFilterEnabled) {
+    const regime = await getMarketRegime();
+    if (!regime.tradeable) {
+      windowStatus.allowed = false;
+      windowStatus.reason = `Regime gate: ${regime.reason}`;
+    }
+  }
+
   const equityContexts = await mapWithConcurrency(settings.watchlist.equities, CONTEXT_PREFETCH_CONCURRENCY, async (symbol) => {
     try {
       return await buildContext(symbol, userId);
@@ -193,6 +264,11 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         results.push({ symbol, action: quantDecision.action, status: 'SKIPPED_TOO_CLOSE_TO_SQUAREOFF' });
         continue;
       }
+      // Time-of-day discipline blocks fresh entries only (a SELL exit must still get through).
+      if (quantDecision.action === 'BUY' && !windowStatus.allowed) {
+        results.push({ symbol, action: 'BUY', status: 'SKIPPED_TRADING_WINDOW', reason: windowStatus.reason });
+        continue;
+      }
       if (quantDecision.confidence < minConfidence) {
         results.push({ symbol, action: quantDecision.action, status: 'SKIPPED_LOW_CONFIDENCE', confidence: quantDecision.confidence });
         continue;
@@ -211,7 +287,10 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         if (Date.now() - lastAttempt < AI_CONFIRM_COOLDOWN_MS) continue; // still cooling down, skip this tick
         lastConfirmAttempt.set(cooldownKey, Date.now());
 
-        const { agreed, log: ensembleLog } = await confirmWithLlm(userId, symbol, settings.aiProvider, quantDecision, ctx, settings.aiModel);
+        const { agreed, log: ensembleLog } = await confirmWithLlm(userId, symbol, settings.aiProvider, quantDecision, ctx, settings.aiModel, {
+          enabled: settings.systemConfig?.consensusEnabled,
+          minAgree: settings.systemConfig?.consensusMinAgree ?? 2,
+        });
         log = ensembleLog;
         if (!agreed) {
           results.push({ symbol, action: quantDecision.action, status: 'SKIPPED_NO_ENSEMBLE_AGREEMENT' });
@@ -278,6 +357,12 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   // no SELL branch here — a fresh options entry is the only thing this decides; exiting
   // an existing option position is handled the same way as equity, automatically, by
   // positionGuardianJob/squareOffJob watching the Position's stored stopLoss/target.
+  // Since every options decision here is a fresh ENTRY, the time-of-day window gates the
+  // whole section up front rather than per-underlying.
+  if (!windowStatus.allowed) {
+    results.push({ symbol: 'OPTIONS', status: 'SKIPPED_TRADING_WINDOW', reason: windowStatus.reason });
+    return { ran: true, results };
+  }
   const openUnderlyings = new Set(openPositions.filter((p) => p.segment === 'FNO').map((p) => p.underlying));
 
   const optionUnderlyings = settings.watchlist.optionUnderlyings;
@@ -293,10 +378,22 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   });
   const optionPrefetchByUnderlying = new Map(optionUnderlyings.map((s, i) => [s, optionPrefetch[i]]));
 
+  const todayKey = istDateKey();
   for (const underlyingSymbol of optionUnderlyings) {
     try {
       if (openUnderlyings.has(underlyingSymbol)) continue;
       if (openPositionCount >= settings.autoInvest.maxOpenPositions) continue;
+
+      // Expiry-day avoidance — the underlying's weekly expiry is whippy (fast theta decay,
+      // pin risk). Skip fresh entries on that day when configured. Nearest expiry comes
+      // from the synced instrument data (same source resolveOptionContract uses).
+      if (settings.systemConfig?.avoidExpiryDay) {
+        const nearestExpiry = await getNearestExpiry(underlyingSymbol).catch(() => null);
+        if (nearestExpiry && istDateKey(new Date(nearestExpiry)) === todayKey) {
+          results.push({ symbol: underlyingSymbol, status: 'SKIPPED_EXPIRY_DAY' });
+          continue;
+        }
+      }
 
       const prefetched = optionPrefetchByUnderlying.get(underlyingSymbol);
       if (!prefetched) {
@@ -316,6 +413,14 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_LOW_CONFIDENCE', confidence: quantDecision.confidence });
         continue;
       }
+      // Opportunity-score gate — the cost-minimization + quality bar. A weak setup is
+      // dropped BEFORE spending an LLM call (the confirm step below), which is the whole
+      // point of the scanner: only pay to reason about genuinely promising contracts.
+      const oppThreshold = settings.systemConfig?.opportunityScoreThreshold ?? 55;
+      if ((quantDecision.opportunityScore ?? 0) < oppThreshold) {
+        results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_LOW_OPPORTUNITY', opportunityScore: quantDecision.opportunityScore });
+        continue;
+      }
 
       let log;
       if (settings.autoInvest.requireAiConfirmation) {
@@ -324,7 +429,10 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         if (Date.now() - lastAttempt < AI_CONFIRM_COOLDOWN_MS) continue;
         lastConfirmAttempt.set(cooldownKey, Date.now());
 
-        const { agreed, log: ensembleLog } = await confirmOptionsWithLlm(userId, underlyingSymbol, contract, settings.aiProvider, quantDecision, ctx, settings.aiModel);
+        const { agreed, log: ensembleLog } = await confirmOptionsWithLlm(userId, underlyingSymbol, contract, settings.aiProvider, quantDecision, ctx, settings.aiModel, {
+          enabled: settings.systemConfig?.consensusEnabled,
+          minAgree: settings.systemConfig?.consensusMinAgree ?? 2,
+        });
         log = ensembleLog;
         if (!agreed) {
           results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_NO_ENSEMBLE_AGREEMENT' });

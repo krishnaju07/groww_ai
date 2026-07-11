@@ -129,11 +129,13 @@ export const TRADE_SOURCES = /** @type {const} */ (['manual', 'automatic', 'ai']
 
 /** Conservative defaults seeded for a brand-new user's RiskConfig. */
 export const DEFAULT_RISK_CONFIG = {
-  maxLossPerDay: 2000,
+  maxLossPerDay: 500,
   maxLossPerTrade: 500,
   maxTradesPerDay: 10,
   maxCapitalPerTradePercent: 5,
   dailyProfitLockPercent: 2,
+  dailyProfitTarget: 1000,
+  maxConsecutiveLosses: 3,
   killSwitchEngaged: false,
 };
 

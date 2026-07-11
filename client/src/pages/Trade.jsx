@@ -8,6 +8,7 @@ import { watchlistService } from '../services/watchlist.service.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { StockSelector } from '../components/trading/StockSelector.jsx';
 import { OptionsSelector } from '../components/trading/OptionsSelector.jsx';
+import { RegimeBadge } from '../components/trading/RegimeBadge.jsx';
 import { LivePriceChart } from '../components/dashboard/LivePriceChart.jsx';
 import { SignalCard } from '../components/trading/SignalCard.jsx';
 import { TradePanel } from '../components/trading/TradePanel.jsx';
@@ -113,7 +114,9 @@ export function Trade() {
           <h1 className="font-display text-2xl font-bold">Trade</h1>
           <p className="text-sm text-muted">Analyze, ask Claude for a read, and place a paper order.</p>
         </div>
-        <div className="flex gap-1 rounded-xl border border-border/70 bg-surface/50 p-1">
+        <div className="flex items-center gap-3">
+          <RegimeBadge />
+          <div className="flex gap-1 rounded-xl border border-border/70 bg-surface/50 p-1">
           {MODES.map((m) => (
             <button
               key={m}
@@ -125,6 +128,7 @@ export function Trade() {
               {m === 'EQUITY' ? 'Equity' : 'Options'}
             </button>
           ))}
+          </div>
         </div>
       </div>
 

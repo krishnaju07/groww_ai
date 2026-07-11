@@ -64,6 +64,57 @@ export function getIntradaySessionContextAt(at) {
   return sessionPhaseFor(new Date(at.getTime() + IST_OFFSET_MIN * 60 * 1000));
 }
 
+const LUNCH_START_MIN = 12 * 60; // 12:00 IST
+const LUNCH_END_MIN = 13 * 60; // 13:00 IST
+
+/** @param {string} hhmm 'HH:MM' @returns {number} minutes-since-midnight, or NaN if malformed */
+function parseHhMm(hhmm) {
+  const [h, m] = String(hhmm ?? '').split(':').map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : NaN;
+}
+
+/**
+ * Time-of-day discipline for the UNATTENDED auto-trading loop — the "AI owns timing"
+ * rules from the project vision. Gates only fresh auto-entries; never blocks exits or
+ * deliberate manual orders. Expiry-day avoidance is handled by the caller
+ * (autoTradingService) since it needs an instrument-data lookup this pure fn can't do.
+ * @param {{avoidFirstMinutes?:number, skipLunchHour?:boolean, stopNewTradesAfter?:string}} cfg
+ * @returns {{allowed:boolean, reason?:string}}
+ */
+export function getAutoTradeWindowStatus(cfg = {}) {
+  const ist = nowIst();
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+
+  const avoidFirst = Number(cfg.avoidFirstMinutes) || 0;
+  if (avoidFirst > 0 && minutes < MARKET_OPEN_MIN + avoidFirst) {
+    return { allowed: false, reason: `Within the first ${avoidFirst} min after open — waiting for price action to settle.` };
+  }
+
+  if (cfg.skipLunchHour && minutes >= LUNCH_START_MIN && minutes < LUNCH_END_MIN) {
+    return { allowed: false, reason: 'Lunch-hour window (12:00-13:00) — low liquidity, skipping new entries.' };
+  }
+
+  const stopAfter = parseHhMm(cfg.stopNewTradesAfter);
+  if (Number.isFinite(stopAfter) && minutes >= stopAfter) {
+    return { allowed: false, reason: `Past the ${cfg.stopNewTradesAfter} new-entry cutoff — too little runway before square-off.` };
+  }
+
+  return { allowed: true };
+}
+
+/**
+ * @param {Date} [date]
+ * @returns {string} the date's IST-calendar day as 'YYYY-MM-DD'. Use this for same-day
+ * comparisons (e.g. "is today the option's expiry day") instead of raw timestamp equality —
+ * an expiry stored as midnight-IST and "today at UTC-midnight" are different instants but
+ * can be the same IST calendar day, so only a normalized IST date-key comparison is correct.
+ */
+export function istDateKey(date = new Date()) {
+  const ist = new Date(date.getTime() + IST_OFFSET_MIN * 60 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}`;
+}
+
 /** @param {Date} ist a Date whose UTC-getter fields already read as IST wall-clock time */
 function sessionPhaseFor(ist) {
   const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();

@@ -20,6 +20,9 @@ const AIDecisionLogSchema = new mongoose.Schema(
     target: { type: Number, default: null },
     reason: { type: String, default: '' },
     confidence: { type: Number, default: 0 },
+    // Options only — the 0-100 scanner score (opportunityScore.js) that ranked this setup
+    // and gated whether it was worth an LLM call. Null for equity/legacy decisions.
+    opportunityScore: { type: Number, default: null },
     // Only populated by the LLM path (Claude/OpenAI) — the Quant cross-check has no
     // news/track-record input and doesn't produce these.
     justification: { type: String, default: '' },

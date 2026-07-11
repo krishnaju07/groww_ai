@@ -48,6 +48,16 @@ const UserSettingsSchema = new mongoose.Schema(
       targetPercent: { type: Number, default: 4 },
       trailingEnabled: { type: Boolean, default: false },
       trailingPercent: { type: Number, default: 1.5 },
+      // Richer, "disciplined trader" exits (positionGuardianJob):
+      // Move the stop to breakeven once a position is up this % — a winner can't turn
+      // into a loser after this. 0 disables.
+      moveSlToCostAtPercent: { type: Number, default: 1.5 },
+      // Book part of the position at a first target, let the rest run. 0 disables.
+      partialBookAtPercent: { type: Number, default: 0 },
+      partialBookFraction: { type: Number, default: 0.5 }, // fraction of quantity to book (0-1)
+      // Time-based exit — close a position that's gone nowhere after this many minutes
+      // (only if it's not meaningfully in profit). 0 disables.
+      maxHoldMinutes: { type: Number, default: 0 },
     },
 
     // Operational switches that used to be .env-only (server restart required to
@@ -68,6 +78,19 @@ const UserSettingsSchema = new mongoose.Schema(
       // evergreen articles Google News' relevance ranking might otherwise surface.
       newsMaxAgeHours: { type: Number, default: env.NEWS_MAX_AGE_HOURS },
       newsHeadlineCount: { type: Number, default: env.NEWS_HEADLINE_COUNT },
+      // Auto-trading time-of-day discipline (gate the unattended loop only — see
+      // marketHours.getAutoTradeWindowStatus). A deliberate manual order is never blocked.
+      avoidFirstMinutes: { type: Number, default: env.AVOID_FIRST_MINUTES },
+      skipLunchHour: { type: Boolean, default: env.SKIP_LUNCH_HOUR },
+      stopNewTradesAfter: { type: String, default: env.STOP_NEW_TRADES_AFTER },
+      avoidExpiryDay: { type: Boolean, default: env.AVOID_EXPIRY_DAY },
+      // When on, fresh auto-entries require a tradeable broad-market regime (see regimeService.js).
+      regimeFilterEnabled: { type: Boolean, default: env.REGIME_FILTER_ENABLED },
+      // Min options Opportunity Score (0-100) to spend an LLM call / take the trade (see opportunityScore.js).
+      opportunityScoreThreshold: { type: Number, default: env.OPPORTUNITY_SCORE_THRESHOLD },
+      // AI Consensus Engine (consensusService.js): poll all configured LLMs and require N to agree.
+      consensusEnabled: { type: Boolean, default: env.CONSENSUS_ENABLED },
+      consensusMinAgree: { type: Number, default: env.CONSENSUS_MIN_AGREE },
     },
   },
   { timestamps: true },

@@ -51,6 +51,31 @@ const Schema = z.object({
   // per stock — see newsService.js. Both live-editable from Settings without a restart.
   NEWS_MAX_AGE_HOURS: z.coerce.number().positive().default(24),
   NEWS_HEADLINE_COUNT: z.coerce.number().int().positive().default(3),
+
+  // Auto-trading time-of-day discipline (the AI "owns timing") — all live-editable from
+  // Settings. These gate the unattended auto-trading loop only; a deliberate manual order
+  // is never blocked by them. See marketHours.getAutoTradeWindowStatus + autoTradingService.
+  AVOID_FIRST_MINUTES: z.coerce.number().min(0).default(15), // no fresh auto-entries in the first N min after 9:15 (erratic open)
+  SKIP_LUNCH_HOUR: boolStr(false), // skip the 12:00-13:00 low-liquidity lunch window
+  STOP_NEW_TRADES_AFTER: z.string().default('14:45'), // 'HH:MM' IST — no fresh auto-entries after this (little runway before 15:15 square-off)
+  AVOID_EXPIRY_DAY: boolStr(false), // skip options auto-entries on the underlying's weekly-expiry day (whippy)
+
+  // Market-regime gate — when on, fresh auto-entries are blocked unless the broad-market
+  // (NIFTY) regime is classified as tradeable (see regimeService.js). Default on: the
+  // vision's "classify before trading, sit out choppy markets" discipline.
+  REGIME_FILTER_ENABLED: boolStr(true),
+
+  // Minimum options Opportunity Score (0-100) a setup must clear before the auto-trader
+  // spends an LLM call / considers the trade (cost-minimization + quality bar). See
+  // opportunityScore.js. Lower = more trades + more API spend; higher = pickier.
+  OPPORTUNITY_SCORE_THRESHOLD: z.coerce.number().min(0).max(100).default(55),
+
+  // AI Consensus Engine (consensusService.js). When OFF, auto-trading confirms with the
+  // single configured aiProvider (cheaper). When ON, it polls EVERY configured LLM and
+  // requires CONSENSUS_MIN_AGREE of them to back Quant's direction — costlier, higher
+  // conviction. Off by default (opt into the extra API spend deliberately).
+  CONSENSUS_ENABLED: boolStr(false),
+  CONSENSUS_MIN_AGREE: z.coerce.number().int().min(1).default(2),
 });
 
 const parsed = Schema.safeParse(process.env);

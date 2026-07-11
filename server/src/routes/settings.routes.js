@@ -48,6 +48,10 @@ const SettingsPatchSchema = z.object({
       targetPercent: z.coerce.number().positive().optional(),
       trailingEnabled: z.boolean().optional(),
       trailingPercent: z.coerce.number().positive().optional(),
+      moveSlToCostAtPercent: z.coerce.number().min(0).optional(),
+      partialBookAtPercent: z.coerce.number().min(0).optional(),
+      partialBookFraction: z.coerce.number().min(0).max(1).optional(),
+      maxHoldMinutes: z.coerce.number().min(0).optional(),
     })
     .partial()
     .optional(),
@@ -62,6 +66,14 @@ const SettingsPatchSchema = z.object({
       aiScanIntervalMinutes: z.coerce.number().positive().optional(),
       newsMaxAgeHours: z.coerce.number().positive().optional(),
       newsHeadlineCount: z.coerce.number().int().positive().optional(),
+      avoidFirstMinutes: z.coerce.number().min(0).optional(),
+      skipLunchHour: z.boolean().optional(),
+      stopNewTradesAfter: z.string().regex(/^\d{1,2}:\d{2}$/, 'Must be HH:MM').optional(),
+      avoidExpiryDay: z.boolean().optional(),
+      regimeFilterEnabled: z.boolean().optional(),
+      opportunityScoreThreshold: z.coerce.number().min(0).max(100).optional(),
+      consensusEnabled: z.boolean().optional(),
+      consensusMinAgree: z.coerce.number().int().min(1).optional(),
       // Not persisted — only checked when enabling enableLiveAutoTrading, then discarded.
       confirmPhrase: z.string().optional(),
     })

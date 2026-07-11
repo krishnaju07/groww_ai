@@ -19,6 +19,7 @@ const Brokers = namedExport(() => import('./pages/Brokers.jsx'), 'Brokers');
 const Orders = namedExport(() => import('./pages/Orders.jsx'), 'Orders');
 const LiveTrading = namedExport(() => import('./pages/LiveTrading.jsx'), 'LiveTrading');
 const Backtest = namedExport(() => import('./pages/Backtest.jsx'), 'Backtest');
+const Reports = namedExport(() => import('./pages/Reports.jsx'), 'Reports');
 
 function PageFallback() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/ai-decisions" element={<AIDecisions />} />
+          <Route path="/reports" element={<Reports />} />
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/live-trading" element={<LiveTrading />} />
           <Route path="/risk" element={<Risk />} />

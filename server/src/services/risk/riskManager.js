@@ -17,16 +17,26 @@ function startOfTodayIst() {
   return new Date(start.getTime() - (5 * 60 + 30) * 60 * 1000);
 }
 
-/** @param {string} userId @returns {Promise<{trades:number, realizedPnl:number, totalCapital:number}>} */
+/** @param {string} userId @returns {Promise<{trades:number, realizedPnl:number, totalCapital:number, consecutiveLosses:number}>} */
 async function computeTodayStats(userId) {
   const since = startOfTodayIst();
   const [tradeCount, closedToday, user] = await Promise.all([
     Trade.countDocuments({ userId, createdAt: { $gte: since } }),
-    Trade.find({ userId, status: 'CLOSED', closedAt: { $gte: since } }).lean(),
+    Trade.find({ userId, status: 'CLOSED', closedAt: { $gte: since } }).sort({ closedAt: 1 }).lean(),
     User.findById(userId).lean(),
   ]);
   const realizedPnl = round2(closedToday.reduce((sum, t) => sum + (t.pnl || 0), 0));
-  return { trades: tradeCount, realizedPnl, totalCapital: user?.startingCapital ?? 100000 };
+
+  // Consecutive losing trades counting back from the most recent close — a winner
+  // (or scratch, pnl >= 0) breaks the streak. This is the "stop after N consecutive
+  // losses / no revenge trading" signal.
+  let consecutiveLosses = 0;
+  for (let i = closedToday.length - 1; i >= 0; i--) {
+    if ((closedToday[i].pnl || 0) < 0) consecutiveLosses++;
+    else break;
+  }
+
+  return { trades: tradeCount, realizedPnl, totalCapital: user?.startingCapital ?? 100000, consecutiveLosses };
 }
 
 /**
@@ -60,8 +70,33 @@ export async function canTrade(userId, proposedOrder) {
     return result;
   }
 
-  // Capital% and per-trade-loss checks only meaningfully apply to entries (BUY); a SELL just closes exposure.
+  // Capital%, profit-target, consecutive-loss, and per-trade-loss checks only meaningfully
+  // apply to entries (BUY); a SELL just closes existing exposure and must never be blocked
+  // by these (that would trap the platform in a position it's trying to exit).
   if (proposedOrder.action === 'BUY') {
+    // Golden Rule — the ₹ daily profit target is the primary "stop when you've won"
+    // gate; it takes precedence over the older percent-based lock. Once hit, new entries
+    // stop for the day but existing positions keep being managed to close.
+    if (cfg.dailyProfitTarget > 0 && today.realizedPnl >= cfg.dailyProfitTarget) {
+      const result = {
+        allowed: false,
+        reason: `Daily profit target ₹${cfg.dailyProfitTarget} reached (realized ₹${today.realizedPnl}). New entries stopped for today — the day's goal is done. Existing positions can still be closed.`,
+      };
+      await log('BLOCK', result.reason, { proposedOrder, today });
+      return result;
+    }
+
+    // "No revenge trading" — stop opening new positions after a losing streak, regardless
+    // of whether the daily-₹ loss cap has been hit yet.
+    if (cfg.maxConsecutiveLosses > 0 && today.consecutiveLosses >= cfg.maxConsecutiveLosses) {
+      const result = {
+        allowed: false,
+        reason: `${today.consecutiveLosses} consecutive losing trades — new entries paused for today (no revenge trading). Existing positions can still be closed.`,
+      };
+      await log('BLOCK', result.reason, { proposedOrder, today });
+      return result;
+    }
+
     const profitLockPercent = cfg.dailyProfitLockPercent ?? 2;
     if (profitLockPercent > 0) {
       const profitLockAmount = round2((profitLockPercent / 100) * today.totalCapital);

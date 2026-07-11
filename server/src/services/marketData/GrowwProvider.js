@@ -60,6 +60,48 @@ export const GrowwProvider = {
     return price;
   },
 
+  /**
+   * Full quote for an F&O contract — the option-chain-intelligence data (open interest,
+   * OI change, implied vol, volume, bid/ask). Throws when the account lacks F&O live-data
+   * entitlement (same failure mode as getLTP), so callers get a real error to surface,
+   * not silent zeros. Fields the payload omits come back as null (partial-data tolerant).
+   * @param {string} symbol @param {'CASH'|'FNO'} [segment]
+   * @returns {Promise<{lastPrice:number|null, oi:number|null, oiChange:number|null, oiChangePercent:number|null, iv:number|null, volume:number|null, bidPrice:number|null, bidQty:number|null, askPrice:number|null, askQty:number|null, dayHigh:number|null, dayLow:number|null}>}
+   */
+  async getQuote(symbol, segment = 'FNO') {
+    const p = await request('/live-data/quote', { exchange: 'NSE', segment, trading_symbol: symbol });
+    const n = (v) => (typeof v === 'number' ? v : null);
+    return {
+      lastPrice: n(p?.last_price),
+      oi: n(p?.open_interest),
+      oiChange: n(p?.oi_day_change),
+      oiChangePercent: n(p?.oi_day_change_percentage),
+      iv: n(p?.implied_volatility),
+      volume: n(p?.volume),
+      bidPrice: n(p?.bid_price),
+      bidQty: n(p?.bid_quantity),
+      askPrice: n(p?.offer_price),
+      askQty: n(p?.offer_quantity),
+      dayHigh: n(p?.high_trade_range),
+      dayLow: n(p?.low_trade_range),
+    };
+  },
+
+  /**
+   * Groww-provided option greeks (delta/gamma/theta/vega/rho/iv) via the dedicated
+   * /live-data/greeks endpoint. Primary greeks source when entitled; the Black-Scholes
+   * engine (optionGreeks.js) is the fallback when this isn't available. Throws on failure.
+   * @param {string} underlying @param {string} tradingSymbol @param {string} expiry 'YYYY-MM-DD'
+   * @returns {Promise<{delta:number|null, gamma:number|null, theta:number|null, vega:number|null, rho:number|null, iv:number|null}>}
+   */
+  async getGreeks(underlying, tradingSymbol, expiry) {
+    const p = await request(
+      `/live-data/greeks/exchange/NSE/underlying/${encodeURIComponent(underlying)}/trading_symbol/${encodeURIComponent(tradingSymbol)}/expiry/${encodeURIComponent(expiry)}`,
+    );
+    const n = (v) => (typeof v === 'number' ? v : null);
+    return { delta: n(p?.delta), gamma: n(p?.gamma), theta: n(p?.theta), vega: n(p?.vega), rho: n(p?.rho), iv: n(p?.iv) };
+  },
+
   /** @param {string[]} symbols @param {'CASH'|'FNO'} [segment] @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
   async getLTPBatch(symbols, segment = 'CASH') {
     if (!symbols.length) return {};

@@ -1,5 +1,6 @@
 import { round2 } from '../../utils/format.js';
 import { DEFAULT_RISK_CONFIG } from '../../config/constants.js';
+import { computeOpportunityScore } from './opportunityScore.js';
 
 // Fallback-only — used when ATR isn't available yet (fresh symbol, not enough candle
 // history). Whenever ctx.atr > 0, stop/target are sized off real volatility instead.
@@ -221,6 +222,7 @@ export function scoreQuantOptions(ctx, investmentAmount = 5000, maxLossPerTrade 
       target: round2(ctx.ce.premium),
       reason: reasons.length ? reasons.join('; ') : 'No strong directional signal',
       confidence: Math.round(Math.abs(score) * 10),
+      opportunityScore: 0,
     };
   }
 
@@ -228,6 +230,20 @@ export function scoreQuantOptions(ctx, investmentAmount = 5000, maxLossPerTrade 
   const optionType = score > 0 ? 'CE' : 'PE';
   const side = optionType === 'CE' ? ctx.ce : ctx.pe;
   const confidence = applyTrackRecordAdjustment(baseConfidence, side.trackRecord, reasons, `this direction's (${ctx.underlying} ${optionType})`);
+
+  // Opportunity score (0-100) — the scanner rank that also gates whether this setup is
+  // worth an expensive LLM call. Uses greeks (from premium) + regime + liquidity/chain
+  // intel when available. See opportunityScore.js.
+  const opportunity = computeOpportunityScore({
+    optionType,
+    premium: side.premium,
+    directionalScore: score,
+    regime: ctx.regime ?? { tradeable: true, bias: 'NONE' },
+    greeks: side.greeks ?? null,
+    liquidity: side.liquidity ?? null,
+    chainIntel: ctx.chainIntel ?? null,
+    sessionPhase: ctx.sessionPhase,
+  });
 
   const stopDistance = side.premiumAtr > 0 ? side.premiumAtr * OPTIONS_ATR_STOP_MULTIPLIER : side.premium * (OPTIONS_STOP_LOSS_PERCENT / 100);
   const targetDistance = side.premiumAtr > 0 ? side.premiumAtr * OPTIONS_ATR_TARGET_MULTIPLIER : side.premium * (OPTIONS_TARGET_PERCENT / 100);
@@ -250,5 +266,7 @@ export function scoreQuantOptions(ctx, investmentAmount = 5000, maxLossPerTrade 
     target: round2(side.premium + targetDistance),
     reason: `${optionType === 'CE' ? 'Bullish' : 'Bearish'} underlying signal — buying ${optionType}; ${reasons.join('; ')}`,
     confidence,
+    opportunityScore: opportunity.score,
+    opportunityBreakdown: opportunity.breakdown,
   };
 }

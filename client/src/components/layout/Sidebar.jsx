@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LineChart, Wallet, ListOrdered, Sparkles, Power, ShieldAlert, Plug, Settings, FlaskConical } from 'lucide-react';
+import { LayoutDashboard, LineChart, Wallet, ListOrdered, Sparkles, Power, ShieldAlert, Plug, Settings, FlaskConical, BarChart3 } from 'lucide-react';
 
 const NAV_SECTIONS = [
   {
@@ -15,6 +15,7 @@ const NAV_SECTIONS = [
     label: 'Automation',
     links: [
       { to: '/ai-decisions', label: 'AI Decisions', icon: Sparkles },
+      { to: '/reports', label: 'Reports', icon: BarChart3 },
       { to: '/backtest', label: 'Backtest', icon: FlaskConical },
       { to: '/live-trading', label: 'Live Trading', icon: Power },
     ],

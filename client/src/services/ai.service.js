@@ -6,4 +6,5 @@ export const aiService = {
   decisions: (params = {}) => api.get('/ai/decisions', { params }).then((r) => r.data),
   signals: () => api.get('/ai/signals').then((r) => r.data),
   stats: () => api.get('/ai/stats').then((r) => r.data),
+  regime: () => api.get('/ai/regime').then((r) => r.data),
 };

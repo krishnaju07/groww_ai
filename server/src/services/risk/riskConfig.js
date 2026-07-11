@@ -16,7 +16,15 @@ export async function getRiskConfig(userId) {
  * @param {Partial<{maxLossPerDay:number, maxLossPerTrade:number, maxTradesPerDay:number, maxCapitalPerTradePercent:number}>} patch
  */
 export async function updateRiskConfig(userId, patch) {
-  const allowed = ['maxLossPerDay', 'maxLossPerTrade', 'maxTradesPerDay', 'maxCapitalPerTradePercent', 'dailyProfitLockPercent'];
+  const allowed = [
+    'maxLossPerDay',
+    'maxLossPerTrade',
+    'maxTradesPerDay',
+    'maxCapitalPerTradePercent',
+    'dailyProfitLockPercent',
+    'dailyProfitTarget',
+    'maxConsecutiveLosses',
+  ];
   const safePatch = Object.fromEntries(Object.entries(patch).filter(([k]) => allowed.includes(k)));
   return RiskConfig.findOneAndUpdate({ userId }, safePatch, { upsert: true, new: true });
 }
