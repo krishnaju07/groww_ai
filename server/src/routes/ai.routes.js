@@ -4,7 +4,8 @@ import { decide, decideOptions } from '../services/ai/decisionEngine.js';
 import { AIDecisionLog } from '../models/AIDecisionLog.js';
 import { Trade } from '../models/Trade.js';
 import { getAllSignals } from '../services/ai/signalCache.js';
-import { STOCK_UNIVERSE, OPTION_UNDERLYINGS } from '../config/constants.js';
+import { OPTION_UNDERLYINGS } from '../config/constants.js';
+import { getEquityDetails } from '../services/instruments/instrumentService.js';
 import { round2 } from '../utils/format.js';
 
 export const aiRoutes = Router();
@@ -13,7 +14,11 @@ aiRoutes.post(
   '/decide/:symbol',
   asyncHandler(async (req, res) => {
     const symbol = req.params.symbol.toUpperCase();
-    if (!STOCK_UNIVERSE.some((s) => s.symbol === symbol)) {
+    // Validated against the real synced equity universe (instrumentService), not the
+    // old fixed STOCK_UNIVERSE — a user can now "Ask AI" on any real NSE stock they've
+    // found via search, not just the 12 curated defaults.
+    const details = await getEquityDetails([symbol]);
+    if (!details[symbol]) {
       const e = new Error(`Unknown symbol: ${symbol}`);
       e.code = 'UNKNOWN_SYMBOL';
       e.status = 400;

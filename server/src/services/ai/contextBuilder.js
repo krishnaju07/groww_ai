@@ -7,6 +7,7 @@ import { getNewsForSymbol } from './newsService.js';
 import { getTrackRecord, getOptionsTrackRecord } from './trackRecordService.js';
 import { getEquityDetails } from '../instruments/instrumentService.js';
 import { getIntradaySessionContext } from '../../utils/marketHours.js';
+import { getSystemConfig } from '../config/systemConfig.js';
 import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../../config/constants.js';
 
 /**
@@ -26,7 +27,10 @@ export async function buildContext(symbol, userId = DEFAULT_USER_ID) {
   // equity universe — see instrumentService.searchEquities) is resolved from the
   // synced Instrument record, falling back to the bare symbol if that lookup misses.
   const seedName = STOCK_UNIVERSE.find((s) => s.symbol === symbol)?.name;
-  const companyName = seedName ?? (await getEquityDetails([symbol]))[symbol]?.name ?? symbol;
+  const [companyName, systemConfig] = await Promise.all([
+    seedName ? Promise.resolve(seedName) : getEquityDetails([symbol]).then((d) => d[symbol]?.name ?? symbol),
+    getSystemConfig(userId),
+  ]);
 
   const [ltp, candles5m, candles15m, candles30m, niftySentiment, sectorContext, news, trackRecord] = await Promise.all([
     marketData.getLTP(symbol),
@@ -35,7 +39,7 @@ export async function buildContext(symbol, userId = DEFAULT_USER_ID) {
     marketData.getCandles(symbol, '30m', 100),
     getNiftySentiment(),
     getSectorContext(symbol),
-    getNewsForSymbol(symbol, companyName).catch((err) => {
+    getNewsForSymbol(symbol, companyName, { headlineCount: systemConfig.newsHeadlineCount, maxAgeHours: systemConfig.newsMaxAgeHours }).catch((err) => {
       console.error(`[contextBuilder] news fetch failed for ${symbol}:`, err.message);
       return [];
     }),
@@ -92,13 +96,14 @@ export async function buildContext(symbol, userId = DEFAULT_USER_ID) {
  */
 export async function buildOptionsContext(contract, userId = DEFAULT_USER_ID) {
   const { underlying, spotSymbol, strike, expiry, lotSize, ce, pe } = contract;
+  const systemConfig = await getSystemConfig(userId);
 
   const [spotCandles5m, spotCandles15m, spotCandles30m, niftySentiment, news, ceSide, peSide] = await Promise.all([
     marketData.getCandles(spotSymbol, '5m', 100),
     marketData.getCandles(spotSymbol, '15m', 100),
     marketData.getCandles(spotSymbol, '30m', 100),
     getNiftySentiment(),
-    getNewsForSymbol(underlying, `${underlying} index`).catch((err) => {
+    getNewsForSymbol(underlying, `${underlying} index`, { headlineCount: systemConfig.newsHeadlineCount, maxAgeHours: systemConfig.newsMaxAgeHours }).catch((err) => {
       console.error(`[contextBuilder] news fetch failed for ${underlying}:`, err.message);
       return [];
     }),

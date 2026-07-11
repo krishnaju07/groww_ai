@@ -31,9 +31,26 @@ const Schema = z.object({
   AI_LLM_ENABLED: boolStr(true),
 
   OPENAI_API_KEY: z.string().optional().default(''),
-  OPENAI_MODEL: z.string().default('gpt-4o'),
+  OPENAI_MODEL: z.string().default('gpt-5.4-mini'),
+
+  // Gemini, Grok, and Perplexity are all called through the OpenAI SDK pointed at each
+  // provider's own OpenAI-compatible endpoint (see decisionEngine.js's
+  // makeOpenAICompatProvider) — no extra SDK dependency needed for any of them.
+  GEMINI_API_KEY: z.string().optional().default(''),
+  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
+
+  GROK_API_KEY: z.string().optional().default(''),
+  GROK_MODEL: z.string().default('grok-4.3'),
+
+  PERPLEXITY_API_KEY: z.string().optional().default(''),
+  PERPLEXITY_MODEL: z.string().default('sonar-pro'),
 
   AI_SCAN_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
+
+  // How fresh a headline must be to feed the AI decision engine, and how many to pull
+  // per stock — see newsService.js. Both live-editable from Settings without a restart.
+  NEWS_MAX_AGE_HOURS: z.coerce.number().positive().default(24),
+  NEWS_HEADLINE_COUNT: z.coerce.number().int().positive().default(3),
 });
 
 const parsed = Schema.safeParse(process.env);

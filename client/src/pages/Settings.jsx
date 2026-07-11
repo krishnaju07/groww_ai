@@ -4,6 +4,7 @@ import { Card } from '../components/common/Card.jsx';
 import { INRInput } from '../components/common/INRInput.jsx';
 import { BTN_PRIMARY, INPUT } from '../lib/ui.js';
 import { toast } from '../store/useToastStore.js';
+import { settingsService } from '../services/settings.service.js';
 
 const MARKET_DATA_PROVIDERS = [
   { key: 'yahoo', label: 'Yahoo Finance' },
@@ -16,9 +17,11 @@ export function Settings() {
   const fetch = useSettingsStore((s) => s.fetch);
   const update = useSettingsStore((s) => s.update);
   const [form, setForm] = useState(null);
+  const [modelOptions, setModelOptions] = useState({});
 
   useEffect(() => {
     fetch();
+    settingsService.aiModelOptions().then(setModelOptions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -122,21 +125,80 @@ export function Settings() {
       </Card>
 
       <Card>
+        <div className="mb-4 font-display font-semibold">News</div>
+        <p className="mb-3 text-xs text-muted">
+          Headlines fed into the AI's context (Google News, no API key needed) — a tighter recency window means "very
+          latest" news only, at the risk of some symbols having no qualifying headlines on a slow news day.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Max headline age (hours)</label>
+            <input
+              type="number"
+              min={1}
+              className={INPUT}
+              value={form.systemConfig?.newsMaxAgeHours ?? 24}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  systemConfig: { ...f.systemConfig, newsMaxAgeHours: Math.max(1, parseInt(e.target.value, 10) || 1) },
+                }))
+              }
+              onBlur={() =>
+                updateSystemConfig(
+                  { newsMaxAgeHours: form.systemConfig.newsMaxAgeHours },
+                  `News recency window set to ${form.systemConfig.newsMaxAgeHours}h`,
+                )
+              }
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted">Stock-specific headlines</label>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              className={INPUT}
+              value={form.systemConfig?.newsHeadlineCount ?? 3}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  systemConfig: { ...f.systemConfig, newsHeadlineCount: Math.max(1, parseInt(e.target.value, 10) || 1) },
+                }))
+              }
+              onBlur={() =>
+                updateSystemConfig(
+                  { newsHeadlineCount: form.systemConfig.newsHeadlineCount },
+                  `Headline count set to ${form.systemConfig.newsHeadlineCount}`,
+                )
+              }
+            />
+          </div>
+        </div>
+      </Card>
+
+      <Card>
         <div className="mb-4 font-display font-semibold">AI Provider</div>
         <p className="mb-3 text-xs text-muted">
           Which LLM the AI decision engine calls for BUY/SELL/WAIT calls. Switches immediately, no restart needed. If the
           selected provider has no API key configured on the server, decisions silently fall back to the quant-only scorer.
         </p>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {[
             { key: 'openai', label: 'OpenAI (GPT)' },
             { key: 'claude', label: 'Claude' },
+            { key: 'gemini', label: 'Gemini' },
+            { key: 'grok', label: 'Grok' },
+            { key: 'perplexity', label: 'Perplexity' },
           ].map(({ key, label }) => (
             <button
               key={key}
               onClick={async () => {
                 try {
-                  await update({ aiProvider: key });
+                  // Reset the model choice on provider switch — a model id picked for
+                  // the old provider (e.g. 'sonar') is meaningless/invalid for a
+                  // different one, so leftover it would otherwise silently break calls.
+                  await update({ aiProvider: key, aiModel: '' });
                   toast.success(`AI provider set to ${label}`);
                 } catch (err) {
                   toast.error(err.message);
@@ -150,6 +212,34 @@ export function Settings() {
             </button>
           ))}
         </div>
+
+        {modelOptions[form.aiProvider]?.length > 0 && (
+          <div className="mt-3">
+            <label className="mb-1 block text-xs font-medium text-muted">
+              Model — cheaper models cost less per call, at some quality tradeoff
+            </label>
+            <select
+              value={form.aiModel || ''}
+              onChange={async (e) => {
+                const value = e.target.value;
+                try {
+                  await update({ aiModel: value });
+                  toast.success(value ? `Model set to ${value}` : 'Using provider default model');
+                } catch (err) {
+                  toast.error(err.message);
+                }
+              }}
+              className={INPUT}
+            >
+              <option value="">Auto (provider default)</option>
+              {modelOptions[form.aiProvider].map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </Card>
 
       <Card>

@@ -61,8 +61,50 @@ export const ACTIONS = /** @type {const} */ (['BUY', 'SELL']);
 /** AI decision actions (WAIT = no trade proposed). */
 export const AI_ACTIONS = /** @type {const} */ (['BUY', 'SELL', 'WAIT']);
 
-/** LLM providers the decision engine can call — switchable live from Settings. */
-export const AI_PROVIDERS = /** @type {const} */ (['claude', 'openai']);
+/**
+ * LLM providers the decision engine can call — switchable live from Settings.
+ * 'claude' uses the Anthropic SDK directly; the rest are all called through the
+ * OpenAI SDK pointed at each provider's own OpenAI-compatible endpoint (see
+ * decisionEngine.js's makeOpenAICompatProvider) — no extra SDK per provider needed.
+ */
+export const AI_PROVIDERS = /** @type {const} */ (['claude', 'openai', 'gemini', 'grok', 'perplexity']);
+
+/**
+ * Curated cheap/balanced/flagship model choices per provider, shown as a dropdown in
+ * Settings (UserSettings.aiModel overrides the provider's env-configured default model
+ * when set). NOT exhaustive and NOT validated server-side against this list (a provider
+ * can ship a new model before this is updated, and a user may want to type a model id
+ * that isn't listed here) — this is a curation aid, not a hard constraint.
+ * Verified against each provider's pricing pages as of mid-2026; provider lineups move
+ * fast, so treat "cheapest"/"flagship" labels as directional, not permanent.
+ */
+export const AI_MODEL_OPTIONS = {
+  claude: [
+    { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — cheapest' },
+    { value: 'claude-sonnet-5', label: 'Sonnet 5 — balanced' },
+    { value: 'claude-opus-4-8', label: 'Opus 4.8 — most capable' },
+  ],
+  openai: [
+    { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano — cheapest' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini — balanced' },
+    { value: 'gpt-5.4', label: 'GPT-5.4 — most capable' },
+  ],
+  gemini: [
+    { value: 'gemini-2.5-flash-lite', label: 'Flash Lite — cheapest' },
+    { value: 'gemini-2.5-flash', label: 'Flash — balanced' },
+    { value: 'gemini-2.5-pro', label: 'Pro — most capable' },
+  ],
+  grok: [
+    { value: 'grok-4.1-fast', label: 'Grok 4.1 Fast — cheapest' },
+    { value: 'grok-4.3', label: 'Grok 4.3 — balanced' },
+    { value: 'grok-4.5', label: 'Grok 4.5 — most capable' },
+  ],
+  perplexity: [
+    { value: 'sonar', label: 'Sonar — cheapest' },
+    { value: 'sonar-pro', label: 'Sonar Pro — balanced' },
+    { value: 'sonar-reasoning-pro', label: 'Sonar Reasoning Pro — most capable' },
+  ],
+};
 
 /**
  * Market-data providers — switchable live from Settings (UserSettings.systemConfig.marketDataProvider).

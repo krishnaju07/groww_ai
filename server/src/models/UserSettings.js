@@ -9,6 +9,13 @@ const UserSettingsSchema = new mongoose.Schema(
     tradingMode: { type: String, enum: TRADING_MODES, default: 'paper' },
     activeBroker: { type: String, enum: BROKERS, default: 'paper' },
     aiProvider: { type: String, enum: AI_PROVIDERS, default: 'openai' },
+    // Per-user override of which model id the selected provider calls (see
+    // config/constants.js's AI_MODEL_OPTIONS for the curated cheap/balanced/flagship
+    // choices shown in Settings). Empty string = fall back to that provider's
+    // env-configured default (env.AI_MODEL/OPENAI_MODEL/etc) — existing behavior
+    // unchanged unless the user actually picks something. Not validated against
+    // AI_MODEL_OPTIONS since a provider may add a model before this list is updated.
+    aiModel: { type: String, default: '' },
 
     minInvestment: { type: Number, default: 1000 },
     maxInvestment: { type: Number, default: 20000 },
@@ -56,6 +63,11 @@ const UserSettingsSchema = new mongoose.Schema(
       ignoreMarketHours: { type: Boolean, default: env.IGNORE_MARKET_HOURS },
       marketDataProvider: { type: String, enum: MARKET_DATA_PROVIDERS, default: env.MARKET_DATA_PROVIDER },
       aiScanIntervalMinutes: { type: Number, default: env.AI_SCAN_INTERVAL_MINUTES },
+      // Headlines older than this are filtered out of the AI decision context (see
+      // newsService.js) — keeps the AI reading today's actual news, not stale
+      // evergreen articles Google News' relevance ranking might otherwise surface.
+      newsMaxAgeHours: { type: Number, default: env.NEWS_MAX_AGE_HOURS },
+      newsHeadlineCount: { type: Number, default: env.NEWS_HEADLINE_COUNT },
     },
   },
   { timestamps: true },

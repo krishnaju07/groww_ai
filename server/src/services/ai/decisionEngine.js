@@ -1,11 +1,15 @@
 /**
  * LLM-driven decision engine. Flow: buildContext -> (LLM + Quant) -> persist
  * AIDecisionLog (always, even WAIT) -> caller runs riskManager.canTrade() -> orderService.
- * The LLM provider (Claude or OpenAI) is a live per-user toggle (UserSettings.aiProvider,
- * switchable from Settings without a restart) — advisory only; the Quant scorer
- * (aiSignalService.js) runs alongside as a cheap cross-check. A malformed/out-of-range
- * LLM response is never trusted as-is — it's clamped/validated or discarded in favor of
- * the Quant result, never turned into an order.
+ * The LLM provider (Claude, OpenAI, Gemini, Grok, or Perplexity) is a live per-user
+ * toggle (UserSettings.aiProvider, switchable from Settings without a restart) —
+ * advisory only; the Quant scorer (aiSignalService.js) runs alongside as a cheap
+ * cross-check. A malformed/out-of-range LLM response is never trusted as-is — it's
+ * clamped/validated or discarded in favor of the Quant result, never turned into an order.
+ * Claude is called via the Anthropic SDK; every other provider is called via the OpenAI
+ * SDK pointed at that provider's own OpenAI-compatible endpoint (Gemini, xAI/Grok, and
+ * Perplexity all publish one) — see makeOpenAICompatProvider below. This avoids a
+ * bespoke SDK/client per provider for what is, structurally, the same request shape.
  */
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
@@ -30,6 +34,17 @@ import { getNearestExpiry, getOptionChain, getAtmStrike } from '../instruments/i
 
 const anthropicClient = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
 const openaiClient = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
+
+// OpenAI-compatible endpoints — verified against each provider's own docs (base URLs
+// and structured-output/json_schema support change occasionally; re-check if a
+// provider starts erroring where it previously worked).
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+const GROK_BASE_URL = 'https://api.x.ai/v1';
+const PERPLEXITY_BASE_URL = 'https://api.perplexity.ai';
+
+const geminiClient = env.GEMINI_API_KEY ? new OpenAI({ apiKey: env.GEMINI_API_KEY, baseURL: GEMINI_BASE_URL }) : null;
+const grokClient = env.GROK_API_KEY ? new OpenAI({ apiKey: env.GROK_API_KEY, baseURL: GROK_BASE_URL }) : null;
+const perplexityClient = env.PERPLEXITY_API_KEY ? new OpenAI({ apiKey: env.PERPLEXITY_API_KEY, baseURL: PERPLEXITY_BASE_URL }) : null;
 
 const SCORE_KEYS = ['trendConfluence', 'momentum', 'volumeConviction', 'newsSentiment', 'trackRecord'];
 
@@ -107,9 +122,9 @@ function sanitizeOptionsDecision(raw, providerLabel) {
  * @param {string} systemPrompt @param {string} userContent @param {object} schema
  * @returns {Promise<object>} the raw (unsanitized) parsed JSON response
  */
-async function callClaudeRaw(systemPrompt, userContent, schema) {
+async function callClaudeRaw(systemPrompt, userContent, schema, model) {
   const response = await anthropicClient.messages.create({
-    model: env.AI_MODEL,
+    model,
     max_tokens: 4096,
     thinking: { type: 'adaptive' },
     output_config: {
@@ -129,10 +144,15 @@ async function callClaudeRaw(systemPrompt, userContent, schema) {
   return JSON.parse(textBlock.text);
 }
 
-/** @param {string} systemPrompt @param {string} userContent @param {object} schema @returns {Promise<object>} the raw (unsanitized) parsed JSON response */
-async function callOpenAIRaw(systemPrompt, userContent, schema) {
-  const response = await openaiClient.chat.completions.create({
-    model: env.OPENAI_MODEL,
+/**
+ * Shared by every OpenAI-compatible provider (OpenAI itself, Gemini, Grok, Perplexity) —
+ * only the client (base URL + key) and model id differ between them.
+ * @param {OpenAI} client @param {string} model @param {string} systemPrompt @param {string} userContent @param {object} schema
+ * @returns {Promise<object>} the raw (unsanitized) parsed JSON response
+ */
+async function callOpenAICompatRaw(client, model, systemPrompt, userContent, schema) {
+  const response = await client.chat.completions.create({
+    model,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent },
@@ -145,81 +165,117 @@ async function callOpenAIRaw(systemPrompt, userContent, schema) {
 
   const choice = response.choices?.[0];
   if (choice?.finish_reason === 'content_filter') {
-    throw new Error('OpenAI declined to answer (content filter)');
+    throw new Error('Provider declined to answer (content filter)');
   }
   const text = choice?.message?.content;
-  if (!text) throw new Error('OpenAI response had no content');
+  if (!text) throw new Error('Provider response had no content');
   return JSON.parse(text);
 }
 
-async function callClaude(symbol, ctx) {
-  const raw = await callClaudeRaw(buildSystemPrompt(), buildUserContent(symbol, ctx), DECISION_SCHEMA);
+async function callClaude(symbol, ctx, modelOverride) {
+  const raw = await callClaudeRaw(buildSystemPrompt(), buildUserContent(symbol, ctx), DECISION_SCHEMA, modelOverride || env.AI_MODEL);
   return sanitizeDecision(raw, 'Claude');
 }
 
-async function callOpenAI(symbol, ctx) {
-  const raw = await callOpenAIRaw(buildSystemPrompt(), buildUserContent(symbol, ctx), DECISION_SCHEMA);
-  return sanitizeDecision(raw, 'OpenAI');
-}
-
-async function callClaudeOptions(ctx) {
-  const raw = await callClaudeRaw(buildOptionsSystemPrompt(), buildOptionsUserContent(ctx), OPTIONS_DECISION_SCHEMA);
+async function callClaudeOptions(ctx, modelOverride) {
+  const raw = await callClaudeRaw(buildOptionsSystemPrompt(), buildOptionsUserContent(ctx), OPTIONS_DECISION_SCHEMA, modelOverride || env.AI_MODEL);
   return sanitizeOptionsDecision(raw, 'Claude');
 }
 
-async function callOpenAIOptions(ctx) {
-  const raw = await callOpenAIRaw(buildOptionsSystemPrompt(), buildOptionsUserContent(ctx), OPTIONS_DECISION_SCHEMA);
-  return sanitizeOptionsDecision(raw, 'OpenAI');
+/**
+ * Builds a PROVIDERS/OPTIONS_PROVIDERS-shaped pair of entries for any OpenAI-compatible
+ * provider — used for openai/gemini/grok/perplexity alike, so adding a new one is just
+ * one call here plus a client/env entry above, not a new bespoke call+Options pair.
+ * `call`/`options.call` accept an optional per-call model override (see
+ * UserSettings.aiModel) — falls back to `defaultModel` (the env-configured one) when
+ * not given, so this is fully backward compatible with a user who's never touched it.
+ * @param {string} label @param {OpenAI|null} client @param {string} defaultModel @param {() => boolean} enabledFlag
+ * @returns {{equity: object, options: object}}
+ */
+function makeOpenAICompatProvider(label, client, defaultModel, enabledFlag) {
+  return {
+    equity: {
+      label,
+      enabledFlag,
+      defaultModel,
+      call: async (symbol, ctx, modelOverride) => {
+        const raw = await callOpenAICompatRaw(client, modelOverride || defaultModel, buildSystemPrompt(), buildUserContent(symbol, ctx), DECISION_SCHEMA);
+        return sanitizeDecision(raw, label);
+      },
+    },
+    options: {
+      label,
+      enabledFlag,
+      defaultModel,
+      call: async (ctx, modelOverride) => {
+        const raw = await callOpenAICompatRaw(client, modelOverride || defaultModel, buildOptionsSystemPrompt(), buildOptionsUserContent(ctx), OPTIONS_DECISION_SCHEMA);
+        return sanitizeOptionsDecision(raw, label);
+      },
+    },
+  };
 }
 
+const openaiProvider = makeOpenAICompatProvider('OpenAI', openaiClient, env.OPENAI_MODEL, () => Boolean(env.OPENAI_API_KEY));
+const geminiProvider = makeOpenAICompatProvider('Gemini', geminiClient, env.GEMINI_MODEL, () => Boolean(env.GEMINI_API_KEY));
+const grokProvider = makeOpenAICompatProvider('Grok', grokClient, env.GROK_MODEL, () => Boolean(env.GROK_API_KEY));
+const perplexityProvider = makeOpenAICompatProvider('Perplexity', perplexityClient, env.PERPLEXITY_MODEL, () => Boolean(env.PERPLEXITY_API_KEY));
+
 const PROVIDERS = {
-  claude: { label: 'Claude', client: () => anthropicClient, call: callClaude, enabledFlag: () => Boolean(env.ANTHROPIC_API_KEY) },
-  openai: { label: 'OpenAI', client: () => openaiClient, call: callOpenAI, enabledFlag: () => Boolean(env.OPENAI_API_KEY) },
+  claude: { label: 'Claude', call: callClaude, enabledFlag: () => Boolean(env.ANTHROPIC_API_KEY), defaultModel: env.AI_MODEL },
+  openai: openaiProvider.equity,
+  gemini: geminiProvider.equity,
+  grok: grokProvider.equity,
+  perplexity: perplexityProvider.equity,
 };
 
 const OPTIONS_PROVIDERS = {
-  claude: { label: 'Claude', call: callClaudeOptions, enabledFlag: () => Boolean(env.ANTHROPIC_API_KEY) },
-  openai: { label: 'OpenAI', call: callOpenAIOptions, enabledFlag: () => Boolean(env.OPENAI_API_KEY) },
+  claude: { label: 'Claude', call: callClaudeOptions, enabledFlag: () => Boolean(env.ANTHROPIC_API_KEY), defaultModel: env.AI_MODEL },
+  openai: openaiProvider.options,
+  gemini: geminiProvider.options,
+  grok: grokProvider.options,
+  perplexity: perplexityProvider.options,
 };
 
 /**
- * Reusable provider dispatch — the same Claude/OpenAI call `decide()` uses
+ * Reusable provider dispatch — the same LLM call `decide()` uses
  * internally, exposed so other callers (e.g. autoTradingService's ensemble
  * confirmation, aiScanJob's background sweep) can get a single LLM opinion
  * without going through decide()'s own quant-call + AIDecisionLog write.
- * @param {string} providerKey 'claude'|'openai'
+ * @param {string} providerKey 'claude'|'openai'|'gemini'|'grok'|'perplexity'
  * @param {string} symbol
  * @param {import('../../types.js').IndicatorSnapshot} ctx
- * @returns {Promise<import('../../types.js').AiDecision & {providerLabel: string}>}
+ * @param {string} [modelOverride] a specific model id (UserSettings.aiModel) — falls back to that provider's env-configured default when omitted/empty
+ * @returns {Promise<import('../../types.js').AiDecision & {providerLabel: string, modelUsed: string}>}
  */
-export async function callProvider(providerKey, symbol, ctx) {
+export async function callProvider(providerKey, symbol, ctx, modelOverride) {
   const provider = PROVIDERS[providerKey] ?? PROVIDERS.openai;
   if (!env.AI_LLM_ENABLED || !provider.enabledFlag()) {
     const e = new Error(`${provider.label} is not enabled/configured.`);
     e.code = 'PROVIDER_UNAVAILABLE';
     throw e;
   }
-  const result = await provider.call(symbol, ctx);
-  return { ...result, providerLabel: provider.label };
+  const result = await provider.call(symbol, ctx, modelOverride);
+  return { ...result, providerLabel: provider.label, modelUsed: modelOverride || provider.defaultModel };
 }
 
 /**
  * Options counterpart to callProvider() — same rationale (autoTradingService's
  * ensemble confirmation for options auto-trading, without going through
  * decideOptions()'s own quant-call + AIDecisionLog write).
- * @param {string} providerKey 'claude'|'openai'
+ * @param {string} providerKey 'claude'|'openai'|'gemini'|'grok'|'perplexity'
  * @param {import('../../types.js').OptionsIndicatorSnapshot} ctx
- * @returns {Promise<import('../../types.js').AiOptionsDecision & {providerLabel: string}>}
+ * @param {string} [modelOverride] a specific model id (UserSettings.aiModel) — falls back to that provider's env-configured default when omitted/empty
+ * @returns {Promise<import('../../types.js').AiOptionsDecision & {providerLabel: string, modelUsed: string}>}
  */
-export async function callProviderOptions(providerKey, ctx) {
+export async function callProviderOptions(providerKey, ctx, modelOverride) {
   const provider = OPTIONS_PROVIDERS[providerKey] ?? OPTIONS_PROVIDERS.openai;
   if (!env.AI_LLM_ENABLED || !provider.enabledFlag()) {
     const e = new Error(`${provider.label} is not enabled/configured.`);
     e.code = 'PROVIDER_UNAVAILABLE';
     throw e;
   }
-  const result = await provider.call(ctx);
-  return { ...result, providerLabel: provider.label };
+  const result = await provider.call(ctx, modelOverride);
+  return { ...result, providerLabel: provider.label, modelUsed: modelOverride || provider.defaultModel };
 }
 
 /**
@@ -237,20 +293,21 @@ export async function decide(userId, symbol) {
 
   const providerKey = settings?.aiProvider ?? 'openai';
   const provider = PROVIDERS[providerKey] ?? PROVIDERS.openai;
+  const modelToUse = settings?.aiModel || provider.defaultModel;
 
   let llm = null;
   if (env.AI_LLM_ENABLED && provider.enabledFlag()) {
     try {
-      llm = await provider.call(symbol, ctx);
+      llm = await provider.call(symbol, ctx, settings?.aiModel);
     } catch (err) {
-      console.error(`[decisionEngine] ${provider.label} call failed for ${symbol}, falling back to Quant:`, err.message);
+      console.error(`[decisionEngine] ${provider.label} (${modelToUse}) call failed for ${symbol}, falling back to Quant:`, err.message);
     }
   }
 
   const primary = llm ?? quant;
   const models = [
     { name: 'Quant', action: quant.action, confidence: quant.confidence },
-    ...(llm ? [{ name: provider.label, action: llm.action, confidence: llm.confidence }] : []),
+    ...(llm ? [{ name: provider.label, model: modelToUse, action: llm.action, confidence: llm.confidence }] : []),
   ];
 
   const log = await AIDecisionLog.create({
@@ -331,20 +388,21 @@ export async function decideOptions(userId, underlyingSymbol) {
 
   const providerKey = settings?.aiProvider ?? 'openai';
   const provider = OPTIONS_PROVIDERS[providerKey] ?? OPTIONS_PROVIDERS.openai;
+  const modelToUse = settings?.aiModel || provider.defaultModel;
 
   let llm = null;
   if (env.AI_LLM_ENABLED && provider.enabledFlag()) {
     try {
-      llm = await provider.call(ctx);
+      llm = await provider.call(ctx, settings?.aiModel);
     } catch (err) {
-      console.error(`[decisionEngine] ${provider.label} options call failed for ${underlyingSymbol}, falling back to Quant:`, err.message);
+      console.error(`[decisionEngine] ${provider.label} (${modelToUse}) options call failed for ${underlyingSymbol}, falling back to Quant:`, err.message);
     }
   }
 
   const primary = llm ?? quant;
   const models = [
     { name: 'Quant', action: quant.action, confidence: quant.confidence },
-    ...(llm ? [{ name: provider.label, action: llm.action, confidence: llm.confidence }] : []),
+    ...(llm ? [{ name: provider.label, model: modelToUse, action: llm.action, confidence: llm.confidence }] : []),
   ];
 
   const tradingSymbol = primary.action === 'BUY' ? contract[primary.optionType.toLowerCase()].tradingSymbol : null;

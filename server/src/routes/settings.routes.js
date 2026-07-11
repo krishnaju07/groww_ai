@@ -5,7 +5,7 @@ import { validate } from '../middleware/validate.js';
 import { UserSettings } from '../models/UserSettings.js';
 import { getTradingModeStatus } from '../services/brokers/tradingModeService.js';
 import { invalidateSystemConfigCache } from '../services/config/systemConfig.js';
-import { BROKERS, TRADING_MODES, AI_PROVIDERS, MARKET_DATA_PROVIDERS } from '../config/constants.js';
+import { BROKERS, TRADING_MODES, AI_PROVIDERS, MARKET_DATA_PROVIDERS, AI_MODEL_OPTIONS } from '../config/constants.js';
 
 export const settingsRoutes = Router();
 
@@ -27,6 +27,10 @@ const SettingsPatchSchema = z.object({
   minInvestment: z.coerce.number().positive().optional(),
   maxInvestment: z.coerce.number().positive().optional(),
   aiProvider: z.enum(AI_PROVIDERS).optional(),
+  // Not restricted to AI_MODEL_OPTIONS's curated list — a user may want to type a
+  // model id a provider shipped after that list was last updated. Empty string means
+  // "use the provider's env-configured default" (see decisionEngine.js).
+  aiModel: z.string().optional(),
   autoInvest: z
     .object({
       enabled: z.boolean().optional(),
@@ -56,6 +60,8 @@ const SettingsPatchSchema = z.object({
       ignoreMarketHours: z.boolean().optional(),
       marketDataProvider: z.enum(MARKET_DATA_PROVIDERS).optional(),
       aiScanIntervalMinutes: z.coerce.number().positive().optional(),
+      newsMaxAgeHours: z.coerce.number().positive().optional(),
+      newsHeadlineCount: z.coerce.number().int().positive().optional(),
       // Not persisted — only checked when enabling enableLiveAutoTrading, then discarded.
       confirmPhrase: z.string().optional(),
     })
@@ -119,6 +125,14 @@ const TradingModeSchema = z.object({
   tradingMode: z.enum(TRADING_MODES).optional(),
   activeBroker: z.enum(BROKERS).optional(),
 });
+
+/** Curated cheap/balanced/flagship model choices per AI provider — powers the model dropdown next to "AI Provider" in Settings. */
+settingsRoutes.get(
+  '/ai-model-options',
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: AI_MODEL_OPTIONS });
+  }),
+);
 
 settingsRoutes.get(
   '/trading-mode',

@@ -35,13 +35,14 @@ const CONTEXT_PREFETCH_CONCURRENCY = 5;
  * @param {string} userId @param {string} symbol @param {string} providerKey
  * @param {import('../../types.js').AiDecision} quantDecision
  * @param {import('../../types.js').IndicatorSnapshot} ctx
+ * @param {string} [modelOverride] UserSettings.aiModel — falls back to the provider's env-configured default when empty
  * @returns {Promise<{agreed:boolean, log:object}>}
  */
-async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx) {
+async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx, modelOverride) {
   let llm = null;
   let llmError = null;
   try {
-    llm = await callProvider(providerKey, symbol, ctx);
+    llm = await callProvider(providerKey, symbol, ctx, modelOverride);
   } catch (err) {
     llmError = err.message;
   }
@@ -62,7 +63,7 @@ async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx) {
     scoreBreakdown: llm?.scoreBreakdown ?? undefined,
     models: [
       { name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence },
-      ...(llm ? [{ name: llm.providerLabel, action: llm.action, confidence: llm.confidence }] : []),
+      ...(llm ? [{ name: llm.providerLabel, model: llm.modelUsed, action: llm.action, confidence: llm.confidence }] : []),
     ],
     indicatorsSnapshot: ctx,
   });
@@ -78,13 +79,14 @@ async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx) {
  * @param {Awaited<ReturnType<typeof resolveOptionContract>>} contract @param {string} providerKey
  * @param {import('../../types.js').AiOptionsDecision} quantDecision
  * @param {import('../../types.js').OptionsIndicatorSnapshot} ctx
+ * @param {string} [modelOverride] UserSettings.aiModel — falls back to the provider's env-configured default when empty
  * @returns {Promise<{agreed:boolean, log:object}>}
  */
-async function confirmOptionsWithLlm(userId, underlyingSymbol, contract, providerKey, quantDecision, ctx) {
+async function confirmOptionsWithLlm(userId, underlyingSymbol, contract, providerKey, quantDecision, ctx, modelOverride) {
   let llm = null;
   let llmError = null;
   try {
-    llm = await callProviderOptions(providerKey, ctx);
+    llm = await callProviderOptions(providerKey, ctx, modelOverride);
   } catch (err) {
     llmError = err.message;
   }
@@ -114,7 +116,7 @@ async function confirmOptionsWithLlm(userId, underlyingSymbol, contract, provide
     scoreBreakdown: llm?.scoreBreakdown ?? undefined,
     models: [
       { name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence },
-      ...(llm ? [{ name: llm.providerLabel, action: llm.action, confidence: llm.confidence }] : []),
+      ...(llm ? [{ name: llm.providerLabel, model: llm.modelUsed, action: llm.action, confidence: llm.confidence }] : []),
     ],
     indicatorsSnapshot: ctx,
   });
@@ -209,7 +211,7 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         if (Date.now() - lastAttempt < AI_CONFIRM_COOLDOWN_MS) continue; // still cooling down, skip this tick
         lastConfirmAttempt.set(cooldownKey, Date.now());
 
-        const { agreed, log: ensembleLog } = await confirmWithLlm(userId, symbol, settings.aiProvider, quantDecision, ctx);
+        const { agreed, log: ensembleLog } = await confirmWithLlm(userId, symbol, settings.aiProvider, quantDecision, ctx, settings.aiModel);
         log = ensembleLog;
         if (!agreed) {
           results.push({ symbol, action: quantDecision.action, status: 'SKIPPED_NO_ENSEMBLE_AGREEMENT' });
@@ -322,7 +324,7 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         if (Date.now() - lastAttempt < AI_CONFIRM_COOLDOWN_MS) continue;
         lastConfirmAttempt.set(cooldownKey, Date.now());
 
-        const { agreed, log: ensembleLog } = await confirmOptionsWithLlm(userId, underlyingSymbol, contract, settings.aiProvider, quantDecision, ctx);
+        const { agreed, log: ensembleLog } = await confirmOptionsWithLlm(userId, underlyingSymbol, contract, settings.aiProvider, quantDecision, ctx, settings.aiModel);
         log = ensembleLog;
         if (!agreed) {
           results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_NO_ENSEMBLE_AGREEMENT' });

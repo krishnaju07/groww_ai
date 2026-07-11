@@ -33,6 +33,10 @@ const AIDecisionLogSchema = new mongoose.Schema(
     models: [
       {
         name: { type: String },
+        // The exact model id used for this LLM entry (e.g. 'sonar-pro') — absent for
+        // the 'Quant' entry, which isn't an LLM call. Lets past decisions be audited
+        // for cost (which model was actually spending money) after the fact.
+        model: { type: String },
         action: { type: String },
         confidence: { type: Number },
       },
