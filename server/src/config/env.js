@@ -83,6 +83,12 @@ const Schema = z.object({
   // trades, so it's inert (safe) on a fresh account and grows teeth as history accrues.
   LEARNING_GATE_ENABLED: boolStr(true),
   LEARNING_MIN_SAMPLE: z.coerce.number().int().min(2).default(5),
+
+  // When true, decisionEngine logs the full request (system prompt, user content, model)
+  // and response for every real LLM call — so you can see exactly what was sent/received
+  // in the server terminal instead of only the final merged decision. Default ON since
+  // this is a debugging aid with no cost/behavior impact; set to 'false' to quiet it down.
+  AI_DEBUG_LOG: boolStr(true),
 });
 
 const parsed = Schema.safeParse(process.env);

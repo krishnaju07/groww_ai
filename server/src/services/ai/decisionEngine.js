@@ -48,6 +48,34 @@ const perplexityClient = env.PERPLEXITY_API_KEY ? new OpenAI({ apiKey: env.PERPL
 
 const SCORE_KEYS = ['trendConfluence', 'momentum', 'volumeConviction', 'newsSentiment', 'trackRecord'];
 
+let logSeq = 0;
+/**
+ * Debug visibility into the actual LLM traffic (env.AI_DEBUG_LOG, on by default) — prints
+ * the exact model/system-prompt/user-content sent and the raw JSON received, so it's clear
+ * a real API call happened (vs. the quant fallback) and exactly what it was asked/told.
+ * @param {string} label provider label (Claude/OpenAI/Gemini/Grok/Perplexity)
+ * @param {string} model @param {string} systemPrompt @param {string} userContent
+ */
+function logAiRequest(label, model, systemPrompt, userContent) {
+  if (!env.AI_DEBUG_LOG) return null;
+  const id = ++logSeq;
+  console.log(`\n[AI #${id}] --> ${label} (${model}) REQUEST @ ${new Date().toISOString()}`);
+  console.log(`[AI #${id}] system:\n${systemPrompt}`);
+  console.log(`[AI #${id}] user:\n${userContent}`);
+  return { id, startedAt: Date.now() };
+}
+
+/** @param {{id:number, startedAt:number}|null} handle @param {object} raw @param {Error} [err] */
+function logAiResponse(handle, raw, err) {
+  if (!handle) return;
+  const ms = Date.now() - handle.startedAt;
+  if (err) {
+    console.log(`[AI #${handle.id}] <-- FAILED after ${ms}ms: ${err.message}\n`);
+  } else {
+    console.log(`[AI #${handle.id}] <-- response after ${ms}ms:\n${JSON.stringify(raw, null, 2)}\n`);
+  }
+}
+
 /** @param {number} n @returns {number} clamped to a 0-100 integer, defaulting to neutral (50) if not a finite number */
 function clampScore(n) {
   return Number.isFinite(Number(n)) ? Math.max(0, Math.min(100, Math.round(Number(n)))) : 50;
@@ -123,25 +151,33 @@ function sanitizeOptionsDecision(raw, providerLabel) {
  * @returns {Promise<object>} the raw (unsanitized) parsed JSON response
  */
 async function callClaudeRaw(systemPrompt, userContent, schema, model) {
-  const response = await anthropicClient.messages.create({
-    model,
-    max_tokens: 4096,
-    thinking: { type: 'adaptive' },
-    output_config: {
-      effort: 'medium',
-      format: { type: 'json_schema', schema },
-    },
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userContent }],
-  });
+  const handle = logAiRequest('Claude', model, systemPrompt, userContent);
+  try {
+    const response = await anthropicClient.messages.create({
+      model,
+      max_tokens: 4096,
+      thinking: { type: 'adaptive' },
+      output_config: {
+        effort: 'medium',
+        format: { type: 'json_schema', schema },
+      },
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    });
 
-  if (response.stop_reason === 'refusal') {
-    throw new Error('Claude declined to answer (refusal)');
+    if (response.stop_reason === 'refusal') {
+      throw new Error('Claude declined to answer (refusal)');
+    }
+
+    const textBlock = response.content.find((b) => b.type === 'text');
+    if (!textBlock) throw new Error('Claude response had no text block');
+    const parsed = JSON.parse(textBlock.text);
+    logAiResponse(handle, parsed);
+    return parsed;
+  } catch (err) {
+    logAiResponse(handle, null, err);
+    throw err;
   }
-
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock) throw new Error('Claude response had no text block');
-  return JSON.parse(textBlock.text);
 }
 
 /**
@@ -150,26 +186,34 @@ async function callClaudeRaw(systemPrompt, userContent, schema, model) {
  * @param {OpenAI} client @param {string} model @param {string} systemPrompt @param {string} userContent @param {object} schema
  * @returns {Promise<object>} the raw (unsanitized) parsed JSON response
  */
-async function callOpenAICompatRaw(client, model, systemPrompt, userContent, schema) {
-  const response = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userContent },
-    ],
-    response_format: {
-      type: 'json_schema',
-      json_schema: { name: 'trade_decision', schema, strict: true },
-    },
-  });
+async function callOpenAICompatRaw(client, model, systemPrompt, userContent, schema, providerLabel = 'Provider') {
+  const handle = logAiRequest(providerLabel, model, systemPrompt, userContent);
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'trade_decision', schema, strict: true },
+      },
+    });
 
-  const choice = response.choices?.[0];
-  if (choice?.finish_reason === 'content_filter') {
-    throw new Error('Provider declined to answer (content filter)');
+    const choice = response.choices?.[0];
+    if (choice?.finish_reason === 'content_filter') {
+      throw new Error('Provider declined to answer (content filter)');
+    }
+    const text = choice?.message?.content;
+    if (!text) throw new Error('Provider response had no content');
+    const parsed = JSON.parse(text);
+    logAiResponse(handle, parsed);
+    return parsed;
+  } catch (err) {
+    logAiResponse(handle, null, err);
+    throw err;
   }
-  const text = choice?.message?.content;
-  if (!text) throw new Error('Provider response had no content');
-  return JSON.parse(text);
 }
 
 async function callClaude(symbol, ctx, modelOverride) {
@@ -199,7 +243,7 @@ function makeOpenAICompatProvider(label, client, defaultModel, enabledFlag) {
       enabledFlag,
       defaultModel,
       call: async (symbol, ctx, modelOverride) => {
-        const raw = await callOpenAICompatRaw(client, modelOverride || defaultModel, buildSystemPrompt(), buildUserContent(symbol, ctx), DECISION_SCHEMA);
+        const raw = await callOpenAICompatRaw(client, modelOverride || defaultModel, buildSystemPrompt(), buildUserContent(symbol, ctx), DECISION_SCHEMA, label);
         return sanitizeDecision(raw, label);
       },
     },
@@ -208,7 +252,7 @@ function makeOpenAICompatProvider(label, client, defaultModel, enabledFlag) {
       enabledFlag,
       defaultModel,
       call: async (ctx, modelOverride) => {
-        const raw = await callOpenAICompatRaw(client, modelOverride || defaultModel, buildOptionsSystemPrompt(), buildOptionsUserContent(ctx), OPTIONS_DECISION_SCHEMA);
+        const raw = await callOpenAICompatRaw(client, modelOverride || defaultModel, buildOptionsSystemPrompt(), buildOptionsUserContent(ctx), OPTIONS_DECISION_SCHEMA, label);
         return sanitizeOptionsDecision(raw, label);
       },
     },
