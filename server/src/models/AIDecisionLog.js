@@ -1,11 +1,19 @@
 import mongoose from 'mongoose';
-import { AI_ACTIONS } from '../config/constants.js';
+import { AI_ACTIONS, OPTION_TYPES } from '../config/constants.js';
 
 /** Every AI decision call — including WAIT — for a full audit trail. */
 const AIDecisionLogSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true },
     symbol: { type: String, required: true },
+    // Populated only for options decisions (decisionEngine.decideOptions) — same
+    // fields as Order/Position/Trade, for consistent auditing/display.
+    segment: { type: String, enum: ['CASH', 'FNO'], default: 'CASH' },
+    underlying: { type: String, default: null },
+    strike: { type: Number, default: null },
+    expiry: { type: Date, default: null },
+    optionType: { type: String, enum: [...OPTION_TYPES, null], default: null },
+    lotSize: { type: Number, default: null },
     action: { type: String, enum: AI_ACTIONS, required: true },
     quantity: { type: Number, default: 0 },
     stopLoss: { type: Number, default: null },

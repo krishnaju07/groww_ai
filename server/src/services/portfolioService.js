@@ -7,6 +7,22 @@ import { brokerFor } from './brokers/registry.js';
 import { effectiveMode } from './brokers/tradingModeService.js';
 import { round2, percentOf } from '../utils/format.js';
 
+/**
+ * A user can now hold both CASH and FNO positions at once — the batch LTP endpoint
+ * needs the right segment per contract, so this splits before fetching and merges back.
+ * @param {{symbol:string, segment?:string}[]} positions
+ * @returns {Promise<Record<string, number>>}
+ */
+async function getLtpsBySegment(positions) {
+  const cashSymbols = positions.filter((p) => (p.segment ?? 'CASH') === 'CASH').map((p) => p.symbol);
+  const fnoSymbols = positions.filter((p) => p.segment === 'FNO').map((p) => p.symbol);
+  const [cashLtps, fnoLtps] = await Promise.all([
+    cashSymbols.length ? marketData.getLTPBatch(cashSymbols, 'CASH') : {},
+    fnoSymbols.length ? marketData.getLTPBatch(fnoSymbols, 'FNO') : {},
+  ]);
+  return { ...cashLtps, ...fnoLtps };
+}
+
 /** @param {string} userId @returns {Promise<object>} */
 export async function getPortfolio(userId) {
   const settings = await UserSettings.findOne({ userId }).lean();
@@ -33,8 +49,7 @@ export async function getPortfolio(userId) {
 async function getLivePortfolio(userId, brokerName) {
   const broker = brokerFor(brokerName, userId);
   const [holdings, margin] = await Promise.all([broker.getPositions(), broker.getMargin()]);
-  const symbols = holdings.map((h) => h.symbol);
-  const ltps = symbols.length ? await marketData.getLTPBatch(symbols) : {};
+  const ltps = await getLtpsBySegment(holdings);
 
   const enriched = holdings.map((h) => {
     const ltp = ltps[h.symbol] ?? h.avgPrice;
@@ -43,6 +58,7 @@ async function getLivePortfolio(userId, brokerName) {
     const pnl = round2(currentValue - investedAmount);
     return {
       symbol: h.symbol,
+      segment: h.segment ?? 'CASH',
       broker: brokerName,
       quantity: h.quantity,
       avgBuyPrice: h.avgPrice,
@@ -79,8 +95,7 @@ async function getLivePortfolio(userId, brokerName) {
 /** The paper-trading ledger. @param {string} userId @returns {Promise<object>} */
 async function getPaperPortfolio(userId) {
   const positions = await Position.find({ userId, broker: 'paper' }).lean();
-  const symbols = positions.map((p) => p.symbol);
-  const ltps = symbols.length ? await marketData.getLTPBatch(symbols) : {};
+  const ltps = await getLtpsBySegment(positions);
 
   const enriched = positions.map((p) => {
     const ltp = ltps[p.symbol] ?? p.avgBuyPrice;
@@ -88,6 +103,10 @@ async function getPaperPortfolio(userId) {
     const pnl = round2(currentValue - p.investedAmount);
     return {
       symbol: p.symbol,
+      segment: p.segment ?? 'CASH',
+      underlying: p.underlying ?? null,
+      strike: p.strike ?? null,
+      optionType: p.optionType ?? null,
       broker: p.broker,
       quantity: p.quantity,
       avgBuyPrice: p.avgBuyPrice,

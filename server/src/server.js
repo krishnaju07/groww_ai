@@ -12,10 +12,13 @@ import { startAiScanJob } from './jobs/aiScanJob.js';
 import { startSquareOffJob } from './jobs/squareOffJob.js';
 import { startPositionGuardianJob } from './jobs/positionGuardianJob.js';
 import { startOrderReconciliationJob } from './jobs/orderReconciliationJob.js';
+import { startInstrumentSyncJob } from './jobs/instrumentSyncJob.js';
+import { ensureInstrumentsSynced } from './services/instruments/instrumentSync.js';
 
 async function main() {
   await connectDb();
   await ensureSeedData();
+  await ensureInstrumentsSynced();
 
   const app = express();
   app.use(cors({ origin: env.CLIENT_ORIGIN }));
@@ -34,6 +37,7 @@ async function main() {
   startSquareOffJob();
   startPositionGuardianJob();
   startOrderReconciliationJob();
+  startInstrumentSyncJob();
 }
 
 main().catch((err) => {

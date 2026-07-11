@@ -22,4 +22,16 @@ export const useAIStore = create((set, get) => ({
       set((s) => ({ deciding: { ...s.deciding, [symbol]: false } }));
     }
   },
+
+  /** @param {string} underlying e.g. 'NIFTY' @param {string} decidingKey the key to track loading under (e.g. the selected contract's tradingSymbol) */
+  async askAIOptions(underlying, decidingKey) {
+    set((s) => ({ deciding: { ...s.deciding, [decidingKey]: true } }));
+    try {
+      const decision = await aiService.decideOptions(underlying);
+      set((s) => ({ decisions: [decision, ...s.decisions] }));
+      return decision;
+    } finally {
+      set((s) => ({ deciding: { ...s.deciding, [decidingKey]: false } }));
+    }
+  },
 }));

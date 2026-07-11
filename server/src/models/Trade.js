@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ACTIONS, BROKERS, TRADE_SOURCES } from '../config/constants.js';
+import { ACTIONS, BROKERS, TRADE_SOURCES, OPTION_TYPES } from '../config/constants.js';
 
 /** One row per filled economic event — a BUY that opened a position, or a SELL that closed one. */
 const TradeSchema = new mongoose.Schema(
@@ -8,6 +8,13 @@ const TradeSchema = new mongoose.Schema(
     broker: { type: String, enum: BROKERS, required: true },
     mode: { type: String, enum: ['paper', 'live'], required: true },
     symbol: { type: String, required: true },
+    // See Order.js for the same segment/option-identity fields.
+    segment: { type: String, enum: ['CASH', 'FNO'], default: 'CASH' },
+    underlying: { type: String, default: null },
+    strike: { type: Number, default: null },
+    expiry: { type: Date, default: null },
+    optionType: { type: String, enum: [...OPTION_TYPES, null], default: null },
+    lotSize: { type: Number, default: null },
     action: { type: String, enum: ACTIONS, required: true },
     quantity: { type: Number, required: true },
     price: { type: Number, required: true },

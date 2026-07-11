@@ -156,3 +156,128 @@ export function buildUserContent(symbol, ctx) {
     'the correct answer whenever the three timeframes don\'t genuinely agree, or there isn\'t enough runway left.',
   ].join('\n');
 }
+
+// --- Options (F&O) — same platform, same risk philosophy, different instrument. ---
+
+/** Structured-output JSON schema for an options (CE/PE) trade decision. */
+export const OPTIONS_DECISION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: { type: 'string', enum: ['BUY', 'WAIT'] },
+    optionType: { type: ['string', 'null'], enum: ['CE', 'PE', null] },
+    quantity: { type: 'integer' },
+    stopLoss: { type: 'number' },
+    target: { type: 'number' },
+    reason: { type: 'string' },
+    confidence: { type: 'integer' },
+    justification: { type: 'string' },
+    scoreBreakdown: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        trendConfluence: { type: 'integer' },
+        momentum: { type: 'integer' },
+        volumeConviction: { type: 'integer' },
+        newsSentiment: { type: 'integer' },
+        trackRecord: { type: 'integer' },
+      },
+      required: ['trendConfluence', 'momentum', 'volumeConviction', 'newsSentiment', 'trackRecord'],
+    },
+  },
+  required: ['action', 'optionType', 'quantity', 'stopLoss', 'target', 'reason', 'confidence', 'justification', 'scoreBreakdown'],
+};
+
+export function buildOptionsSystemPrompt() {
+  return [
+    'You are a professional intraday options analyst trading NSE index options (Nifty 50) for this platform.',
+    'This platform only ever BUYS options to open a position (never writes/sells naked options) — so your only',
+    'decision is which direction to buy: BUY a CALL (CE) if you are bullish on the underlying index, BUY a PUT',
+    '(PE) if you are bearish, or WAIT if there is no real edge. Exiting an existing option position is handled',
+    'automatically elsewhere (the same stop-loss/target/square-off enforcement equity positions get) — you are',
+    'only ever deciding on a FRESH entry here, never an exit.',
+    '',
+    'Every position this platform opens MUST be closed the same day (no overnight/carry positions) — this is',
+    'enforced mechanically: every order is intraday (MIS), an automated Position Guardian checks every open',
+    'position\'s stop-loss/target roughly every 15 SECONDS and closes it the instant either is hit, and any',
+    'position still open gets force-closed at the 15:15 IST square-off. You are given minutesToSquareOff and',
+    'sessionPhase — in the "closing" phase (last 45 min before square-off) lean toward WAIT for new entries',
+    'unless the setup is high-conviction, since options lose value to time decay (theta) faster the closer to',
+    'expiry/close-of-day, on top of having little runway left for the move to play out.',
+    '',
+    'Options carry sharper risk than the equity this platform also trades: a long option can lose its ENTIRE',
+    'premium (100% of what was paid) if the underlying moves against you and time runs out — there is no slow',
+    'mean-reversion cushion like a stock has. This makes your #1 priority — capital preservation over being',
+    'busy — even more important here than for equity. When signals are mixed, weak, or the three underlying',
+    'timeframes disagree, you MUST output WAIT. Only BUY when multiple independent underlying signals genuinely',
+    'line up.',
+    '',
+    'You are advisory only — the Risk Manager has final veto power over position sizing and whether a trade is',
+    'allowed at all. Do not self-limit position size for risk reasons; that is the Risk Manager\'s job. Your job',
+    'is the honest technical read on the underlying plus a well-calibrated confidence score.',
+    '',
+    'How to read the snapshot: everything technical (RSI, MACD, the three trend timeframes, Parabolic SAR,',
+    'Supertrend, support/resistance, Nifty sentiment, volume) is computed on the UNDERLYING INDEX, not the',
+    'option\'s own premium — that is what actually carries a tradeable directional pattern. Read them exactly',
+    'as you would for an equity call: require genuine multi-signal confluence, treat SAR/Supertrend as a fourth',
+    'and fifth vote alongside the three trend timeframes, and require above-average volume before trusting a',
+    'breakout near support/resistance. News headlines are today\'s broad-market context for the index. Track',
+    'record here is this specific direction\'s (CE-buying or PE-buying) own history on this underlying, NOT the',
+    'exact contract\'s history (a new contract exists every expiry, so its own history would never accumulate) —',
+    'fewer than ~5 closed trades is not enough sample to mean much either way.',
+    '',
+    'stopLoss and target are absolute PREMIUM values (₹ per unit of the option, not the underlying\'s price).',
+    'Anchor their distance from the current premium to premiumAtr when it is greater than 0 (the option\'s own',
+    'real volatility) — otherwise fall back to roughly 30% of the current premium for the stop and 60% for the',
+    'target (keeping reward at least ~2x the risk), tightened if there is little runway left before square-off.',
+    'quantity is your suggested total contract quantity — a multiple of lotSize — assuming a moderate ~₹5000',
+    'position (0 for WAIT); advisory only, the platform sizes the real order off its own risk-budget calculation.',
+    '',
+    'reason is one concise sentence naming the single strongest driver of the call and which direction (CE/PE)',
+    'you chose. justification is 2-4 sentences: the full reasoning chain — which underlying signals agreed,',
+    'which disagreed and why they were outweighed, what news/track record added, and why the risk:reward and',
+    'remaining intraday runway (accounting for theta decay) justify acting now.',
+    '',
+    'scoreBreakdown mirrors the equity version — five independent 0-100 sub-scores (trendConfluence, momentum,',
+    'volumeConviction, newsSentiment, trackRecord), all computed against the underlying/direction as described',
+    'above. confidence (0-100) should be consistent with these sub-scores: roughly 80-100 only for full',
+    '3-timeframe confluence plus volume confirmation, 50-79 for partial agreement, below 50 should almost',
+    'always resolve to WAIT given how much sharper an option\'s downside is versus equity.',
+  ].join('\n');
+}
+
+export function buildOptionsUserContent(ctx) {
+  const newsBlock = ctx.news?.length ? ctx.news.map((h) => `  - ${h}`).join('\n') : '  - No recent headlines found.';
+
+  const trackRecordLine = (side, label) =>
+    side.trackRecord && side.trackRecord.totalClosed > 0
+      ? `${label} AI-decision track record: ${side.trackRecord.totalClosed} closed trade(s), ${side.trackRecord.winRate}% win rate, avg P&L ₹${side.trackRecord.avgPnl}/trade.`
+      : `${label} AI-decision track record: no closed trades yet — treat as neutral (50).`;
+
+  return [
+    `Underlying: ${ctx.underlying} | Strike: ${ctx.strike} | Expiry: ${new Date(ctx.expiry).toISOString().slice(0, 10)} | Lot size: ${ctx.lotSize}`,
+    `Underlying index price: ₹${ctx.spotLtp}`,
+    `CALL (CE) premium: ₹${ctx.ce.premium} | premiumAtr: ${ctx.ce.premiumAtr > 0 ? ctx.ce.premiumAtr : 'not enough history yet — use ~30%/60% of premium fallback'}`,
+    `PUT (PE) premium: ₹${ctx.pe.premium} | premiumAtr: ${ctx.pe.premiumAtr > 0 ? ctx.pe.premiumAtr : 'not enough history yet — use ~30%/60% of premium fallback'}`,
+    `RSI(14) on underlying: ${ctx.rsi}`,
+    `MACD (underlying): macd=${ctx.macd.macd} signal=${ctx.macd.signal} histogram=${ctx.macd.histogram}`,
+    `Volume vs 20-period average (underlying): ${ctx.volumeRatio}x`,
+    `Short-term (5m) trend: ${ctx.trendShortTerm} | Medium-term (15m) trend: ${ctx.trendMediumTerm} | Long-term (30m) trend: ${ctx.trendLongTerm}`,
+    `Parabolic SAR: ${ctx.psar.trend} (₹${ctx.psar.value}) | Supertrend: ${ctx.supertrend.trend} (₹${ctx.supertrend.value})`,
+    `Underlying ATR (5m, ₹): ${ctx.atr > 0 ? ctx.atr : 'not enough history yet'}`,
+    `Session phase: ${ctx.sessionPhase} | Minutes until mandatory square-off (15:15 IST): ${ctx.minutesToSquareOff}`,
+    `Support: ₹${ctx.levels.support} | Resistance: ₹${ctx.levels.resistance} (underlying levels)`,
+    ctx.niftySentiment,
+    '',
+    "Today's news headlines (broad market, judge relevance/impact yourself):",
+    newsBlock,
+    '',
+    trackRecordLine(ctx.ce, `Buying ${ctx.underlying} CE:`),
+    trackRecordLine(ctx.pe, `Buying ${ctx.underlying} PE:`),
+    '',
+    'If you decide BUY, use that side\'s premium/premiumAtr above (not the other side\'s) to size stopLoss/target.',
+    'Decision: BUY (specify optionType CE or PE) or WAIT? Remember: this must close before today\'s 15:15 IST',
+    'square-off, and WAIT is the correct answer whenever the three timeframes don\'t genuinely agree, or there',
+    'isn\'t enough runway left, or the setup doesn\'t clearly justify an option\'s sharper downside vs equity.',
+  ].join('\n');
+}

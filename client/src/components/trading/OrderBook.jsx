@@ -28,7 +28,14 @@ export function OrderBook({ orders = [], onCancel }) {
             <tbody>
               {orders.map((o) => (
                 <tr key={o._id} className="border-t border-border/50">
-                  <td className="py-2 font-medium">{o.symbol}</td>
+                  <td className="py-2 font-medium">
+                    {o.symbol}
+                    {o.segment === 'FNO' && (
+                      <span className="ml-1.5 rounded bg-accent/10 px-1.5 py-0.5 text-xs font-semibold text-accent">
+                        {o.strike} {o.optionType}
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2">
                     <Badge tone={o.action === 'BUY' ? 'accent' : 'danger'}>{o.action}</Badge>
                   </td>

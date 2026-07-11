@@ -1,9 +1,12 @@
 import cron from 'node-cron';
-import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../config/constants.js';
-import { decide } from '../services/ai/decisionEngine.js';
+import { DEFAULT_USER_ID, STOCK_UNIVERSE, OPTION_UNDERLYINGS } from '../config/constants.js';
+import { decide, decideOptions } from '../services/ai/decisionEngine.js';
 import { setSignal } from '../services/ai/signalCache.js';
 import { isMarketOpen } from '../utils/marketHours.js';
 import { getSystemConfig } from '../services/config/systemConfig.js';
+
+/** signalCache is a flat symbol->signal map — namespaced so an option underlying (e.g. 'NIFTY') never collides with an equity symbol of the same name. */
+const optionsSignalKey = (underlyingSymbol) => `OPTIONS:${underlyingSymbol}`;
 
 let running = false;
 let lastScanAt = 0;
@@ -33,6 +36,23 @@ export async function runAiScan(userId = DEFAULT_USER_ID) {
       console.error(`[aiScanJob] scan failed for ${symbol}:`, err.message);
     }
   }
+
+  for (const { symbol } of OPTION_UNDERLYINGS) {
+    try {
+      const decision = await decideOptions(userId, symbol);
+      setSignal(optionsSignalKey(symbol), {
+        action: decision.action,
+        optionType: decision.optionType,
+        confidence: decision.confidence,
+        reason: decision.reason,
+        justification: decision.justification,
+        scoreBreakdown: decision.scoreBreakdown,
+      });
+    } catch (err) {
+      console.error(`[aiScanJob] options scan failed for ${symbol}:`, err.message);
+    }
+  }
+
   return { ran: true };
 }
 

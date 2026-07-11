@@ -14,6 +14,7 @@ import { canTrade } from './risk/riskManager.js';
 import { effectiveMode, assertLiveAllowed } from './brokers/tradingModeService.js';
 import { brokerFor } from './brokers/registry.js';
 import { getSystemConfig } from './config/systemConfig.js';
+import { getInstrument } from './instruments/instrumentService.js';
 import { generateIdempotencyKey } from '../utils/idempotency.js';
 import { applyBuyToPosition, applySellToPosition } from '../utils/positionLedger.js';
 import { getIntradaySessionContext } from '../utils/marketHours.js';
@@ -33,7 +34,9 @@ import { round2 } from '../utils/format.js';
  * job) is responsible for guarding against calling this twice for the same order
  * (see Order.tradeId — set once a fill is recorded, checked before calling again).
  * @param {string} userId @param {string} brokerName
- * @param {{symbol:string, action:'BUY'|'SELL', quantity:number, stopLoss?:number, target?:number, source:string, triggerReason?:string, aiDecisionId?:string}} input
+ * @param {{symbol:string, action:'BUY'|'SELL', quantity:number, stopLoss?:number, target?:number, source:string,
+ *   triggerReason?:string, aiDecisionId?:string, segment?:string, underlying?:string|null, strike?:number|null,
+ *   expiry?:Date|null, optionType?:string|null, lotSize?:number|null}} input
  * @param {{status:string, filledPrice?:number, filledQuantity?:number}} result
  * @returns {Promise<import('mongoose').Types.ObjectId|null>} the created Trade's _id, or null if not actually filled
  */
@@ -42,6 +45,14 @@ export async function recordLiveFill(userId, brokerName, input, result) {
 
   const price = result.filledPrice;
   const quantity = result.filledQuantity || input.quantity;
+  const optionFields = {
+    segment: input.segment ?? 'CASH',
+    underlying: input.underlying ?? null,
+    strike: input.strike ?? null,
+    expiry: input.expiry ?? null,
+    optionType: input.optionType ?? null,
+    lotSize: input.lotSize ?? null,
+  };
 
   if (input.action === 'BUY') {
     // Position mutation happens first, Trade.create last — if this whole function gets
@@ -61,6 +72,7 @@ export async function recordLiveFill(userId, brokerName, input, result) {
       stopLoss: input.stopLoss,
       target: input.target,
       aiDecisionId: input.aiDecisionId,
+      ...optionFields,
     });
 
     const trade = await Trade.create({
@@ -76,6 +88,7 @@ export async function recordLiveFill(userId, brokerName, input, result) {
       triggerReason: input.triggerReason ?? '',
       status: 'OPEN',
       aiDecisionId: input.aiDecisionId ?? null,
+      ...optionFields,
     });
     return trade._id;
   }
@@ -110,6 +123,7 @@ export async function recordLiveFill(userId, brokerName, input, result) {
     pnlPercent: costBasis ? round2((pnl / costBasis) * 100) : 0,
     aiDecisionId: input.aiDecisionId ?? null,
     closedAt: new Date(),
+    ...optionFields,
   });
   return trade._id;
 }
@@ -134,6 +148,7 @@ async function attachProtectiveOco(userId, brokerName, broker, symbol) {
       quantity: position.quantity,
       stopLoss: position.stopLoss,
       target: position.target,
+      segment: position.segment ?? 'CASH',
     });
     position.smartOrderId = smartOrder.smartOrderId;
     position.smartOrderType = smartOrder.smartOrderType ?? 'OCO';
@@ -150,10 +165,10 @@ async function attachProtectiveOco(userId, brokerName, broker, symbol) {
  * deletes the Position doc (positionLedger deletes it once quantity hits 0).
  * @param {import('../types.js').BrokerAdapter} broker @param {string|null} smartOrderId @param {string|null} smartOrderType @param {string} symbol
  */
-async function releaseProtectiveOco(broker, smartOrderId, smartOrderType, symbol) {
+async function releaseProtectiveOco(broker, smartOrderId, smartOrderType, symbol, segment = 'CASH') {
   if (!smartOrderId || typeof broker.cancelSmartOrder !== 'function') return;
   try {
-    await broker.cancelSmartOrder(smartOrderId, smartOrderType);
+    await broker.cancelSmartOrder(smartOrderId, smartOrderType, segment);
   } catch (err) {
     console.error(`[orderService] failed to cancel protective OCO ${smartOrderId} for ${symbol}:`, err.message);
   }
@@ -190,11 +205,12 @@ async function createOrder(doc) {
  * @param {string} userId
  * @param {{symbol:string, action:'BUY'|'SELL', quantity:number, orderType?:'MARKET'|'LIMIT',
  *   price?:number, stopLoss?:number, target?:number, source?:'manual'|'automatic'|'ai',
- *   triggerReason?:string, aiDecisionId?:string, confirmRealMoney?:boolean}} input
+ *   triggerReason?:string, aiDecisionId?:string, confirmRealMoney?:boolean, segment?:'CASH'|'FNO'}} input
  * @returns {Promise<{orderId:string, brokerOrderId:string, status:string, broker:string, mode:string, filledPrice?:number, filledQuantity?:number}>}
  */
 export async function placeOrder(userId, input) {
   const source = input.source ?? 'manual';
+  const segment = input.segment ?? 'CASH';
   const settings = await UserSettings.findOneAndUpdate(
     { userId },
     { $setOnInsert: { userId } },
@@ -204,6 +220,39 @@ export async function placeOrder(userId, input) {
   const mode = await effectiveMode(userId, settings);
   const brokerName = mode === 'live' ? settings.activeBroker : 'paper';
   const systemConfig = await getSystemConfig(userId);
+
+  // FNO's strike/expiry/optionType/lotSize always come from the synced Instrument
+  // record, never trusted from the caller (client or AI) — same "never trust a
+  // client-supplied risk decision" principle riskManager applies to sizing. Lot size
+  // in particular gates the quantity validation just below.
+  let instrument = null;
+  if (segment === 'FNO') {
+    instrument = await getInstrument(input.symbol);
+    if (!instrument) {
+      throw codedError(
+        `Unknown option contract '${input.symbol}' — instrument data may not be synced yet.`,
+        'UNKNOWN_INSTRUMENT',
+        400,
+      );
+    }
+    if (!instrument.lotSize || input.quantity % instrument.lotSize !== 0) {
+      throw codedError(
+        `Quantity ${input.quantity} must be a multiple of the lot size (${instrument.lotSize}) for ${input.symbol}.`,
+        'INVALID_LOT_SIZE',
+        400,
+      );
+    }
+  }
+  const optionFields = instrument
+    ? {
+        segment: 'FNO',
+        underlying: instrument.underlyingSymbol,
+        strike: instrument.strikePrice,
+        expiry: instrument.expiryDate,
+        optionType: instrument.optionType,
+        lotSize: instrument.lotSize,
+      }
+    : { segment: 'CASH', underlying: null, strike: null, expiry: null, optionType: null, lotSize: null };
 
   // This platform's entire premise is intraday-only, no overnight positions. NSE cash
   // technically stays open until 15:30 IST, but squareOffJob's daily force-close cutoff
@@ -224,7 +273,7 @@ export async function placeOrder(userId, input) {
     }
   }
 
-  const estimatedPrice = input.price ?? (await marketData.getLTP(input.symbol));
+  const estimatedPrice = input.price ?? (await marketData.getLTP(input.symbol, segment));
 
   if (mode === 'live') {
     await assertLiveAllowed(userId, brokerName);
@@ -268,6 +317,7 @@ export async function placeOrder(userId, input) {
         broker: brokerName,
         mode,
         symbol: input.symbol,
+        ...optionFields,
         action: input.action,
         orderType: input.orderType ?? 'MARKET',
         quantity: input.quantity,
@@ -293,6 +343,7 @@ export async function placeOrder(userId, input) {
     broker: brokerName,
     mode,
     symbol: input.symbol,
+    ...optionFields,
     action: input.action,
     orderType: input.orderType ?? 'MARKET',
     quantity: input.quantity,
@@ -314,7 +365,7 @@ export async function placeOrder(userId, input) {
     let preSellSmartOrder = null;
     if (mode === 'live' && input.action === 'SELL') {
       const existing = await Position.findOne({ userId, broker: brokerName, symbol: input.symbol }).lean();
-      if (existing?.smartOrderId) preSellSmartOrder = { id: existing.smartOrderId, type: existing.smartOrderType };
+      if (existing?.smartOrderId) preSellSmartOrder = { id: existing.smartOrderId, type: existing.smartOrderType, segment: existing.segment ?? 'CASH' };
     }
 
     const result = await broker.placeOrder({
@@ -328,6 +379,7 @@ export async function placeOrder(userId, input) {
       source,
       triggerReason: input.triggerReason,
       aiDecisionId: input.aiDecisionId,
+      ...optionFields,
     });
 
     orderDoc.brokerOrderId = result.brokerOrderId;
@@ -336,7 +388,7 @@ export async function placeOrder(userId, input) {
 
     if (mode === 'live') {
       try {
-        const tradeId = await recordLiveFill(userId, brokerName, input, result);
+        const tradeId = await recordLiveFill(userId, brokerName, { ...input, ...optionFields }, result);
         if (tradeId) {
           orderDoc.tradeId = tradeId;
           await orderDoc.save();
@@ -349,7 +401,7 @@ export async function placeOrder(userId, input) {
         if (input.action === 'BUY') {
           await attachProtectiveOco(userId, brokerName, broker, input.symbol);
         } else if (preSellSmartOrder) {
-          await releaseProtectiveOco(broker, preSellSmartOrder.id, preSellSmartOrder.type, input.symbol);
+          await releaseProtectiveOco(broker, preSellSmartOrder.id, preSellSmartOrder.type, input.symbol, preSellSmartOrder.segment);
         }
       } catch (err) {
         // Never let bookkeeping failure hide a real broker fill from the caller —

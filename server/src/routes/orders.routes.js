@@ -22,6 +22,10 @@ const PlaceOrderSchema = z.object({
   triggerReason: z.string().optional(),
   aiDecisionId: z.string().optional(),
   confirmRealMoney: z.boolean().optional(),
+  // Options — when segment is 'FNO', `symbol` must be the exact option contract trading_symbol
+  // (from GET /options/chain); orderService resolves strike/expiry/optionType/lotSize itself
+  // from the synced Instrument record, so the client only ever needs to send `segment`.
+  segment: z.enum(['CASH', 'FNO']).optional(),
 });
 
 ordersRoutes.get(
@@ -63,6 +67,7 @@ ordersRoutes.get(
         mode: 'live',
         brokerOrderId: bo.brokerOrderId,
         symbol: bo.symbol ?? local?.symbol,
+        segment: bo.segment ?? local?.segment ?? 'CASH',
         action: bo.action ?? local?.action,
         quantity: bo.quantity ?? local?.quantity,
         orderType: local?.orderType ?? 'MARKET',

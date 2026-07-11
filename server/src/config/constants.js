@@ -18,6 +18,21 @@ export const STOCK_UNIVERSE = [
 
 export const NIFTY_INDEX_SYMBOL = 'NIFTY 50';
 
+/**
+ * Index underlyings this platform trades options on. `spotSymbol` is the bare
+ * equity/index symbol used to fetch underlying-index technicals (contextBuilder
+ * reuses the existing equity indicator pipeline against this); `growwUnderlyingSymbol`
+ * is the `underlying_symbol` value used to filter Groww's instrument CSV for this
+ * underlying's option chain (see instrumentSync.js / instrumentService.js).
+ */
+export const OPTION_UNDERLYINGS = [
+  { symbol: 'NIFTY', name: 'Nifty 50', growwUnderlyingSymbol: 'NIFTY', spotSymbol: 'NIFTY 50' },
+];
+
+export const OPTION_TYPES = /** @type {const} */ (['CE', 'PE']);
+
+export const INSTRUMENT_TYPES = /** @type {const} */ (['EQ', 'FUT', 'OPT']);
+
 /** Broker identifiers used across UserSettings.activeBroker, Trade/Order/Position.broker. Paper (simulation) and Groww (the only live broker this platform integrates with) are the only two. */
 export const BROKERS = /** @type {const} */ (['paper', 'groww']);
 
@@ -69,6 +84,8 @@ export const DEFAULT_STARTING_CAPITAL = 100000;
 // --- Groww Trade API (market data + order execution) ---
 export const GROWW_BASE_URL = 'https://api.groww.in/v1';
 export const GROWW_API_VERSION = '1.0';
+/** Static instrument master (all NSE cash + F&O contracts, no auth required) — instrumentSync.js's sole data source; there is no dynamic option-chain/search API. */
+export const GROWW_INSTRUMENTS_CSV_URL = 'https://growwapi-assets.groww.in/instruments/instrument.csv';
 export const GROWW_ORDER = {
   PRODUCT_CNC: 'CNC',
   PRODUCT_MIS: 'MIS',
@@ -80,6 +97,8 @@ export const GROWW_ORDER = {
   TRANSACTION_SELL: 'SELL',
   EXCHANGE_NSE: 'NSE',
   SEGMENT_CASH: 'CASH',
+  SEGMENT_FNO: 'FNO',
+  PRODUCT_NRML: 'NRML',
   // Smart Orders (GTT/OCO) — /order-advance/* endpoints, used to place a broker-side
   // stop-loss/target safety net alongside positionGuardianJob's own polling.
   SMART_ORDER_TYPE_GTT: 'GTT',

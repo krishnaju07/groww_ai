@@ -48,11 +48,11 @@ function parseIstCandleTimestamp(ts) {
 export const GrowwProvider = {
   name: 'groww',
 
-  /** @param {string} symbol @returns {Promise<number>} */
-  async getLTP(symbol) {
+  /** @param {string} symbol @param {'CASH'|'FNO'} [segment] @returns {Promise<number>} */
+  async getLTP(symbol, segment = 'CASH') {
     const payload = await request('/live-data/quote', {
       exchange: 'NSE',
-      segment: 'CASH',
+      segment,
       trading_symbol: symbol,
     });
     const price = payload?.last_price;
@@ -60,11 +60,11 @@ export const GrowwProvider = {
     return price;
   },
 
-  /** @param {string[]} symbols @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
-  async getLTPBatch(symbols) {
+  /** @param {string[]} symbols @param {'CASH'|'FNO'} [segment] @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
+  async getLTPBatch(symbols, segment = 'CASH') {
     if (!symbols.length) return {};
     const exchangeSymbols = symbols.map((s) => `NSE_${s}`).join(',');
-    const payload = await request('/live-data/ltp', { segment: 'CASH', exchange_symbols: exchangeSymbols });
+    const payload = await request('/live-data/ltp', { segment, exchange_symbols: exchangeSymbols });
     const out = {};
     for (const s of symbols) {
       const price = payload?.[`NSE_${s}`];
@@ -76,16 +76,18 @@ export const GrowwProvider = {
   /**
    * Uses /historical/candles (the Backtesting-section endpoint) — /historical/candle/range
    * is deprecated by Groww ("will NOT work in the future") and has been retired from here.
-   * @param {string} symbol
+   * @param {string} symbol for CASH, the bare equity symbol; for FNO, the contract's exact
+   *   `growwSymbol` (from the Instrument record — see instrumentService.js), not the trading_symbol.
    * @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval
    * @param {number} [limit]
+   * @param {'CASH'|'FNO'} [segment]
    * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
    */
-  async getCandles(symbol, interval = '5m', limit = 100) {
+  async getCandles(symbol, interval = '5m', limit = 100, segment = 'CASH') {
     const minutes = INTERVAL_MINUTES[interval] ?? 5;
     const end = new Date();
     const start = new Date(end.getTime() - minutes * 60 * 1000 * limit);
-    const rows = await fetchCandleRows(symbol, interval, start, end);
+    const rows = await fetchCandleRows(symbol, interval, start, end, segment);
     return rows.slice(-limit);
   },
 
@@ -98,24 +100,28 @@ export const GrowwProvider = {
    * @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval
    * @param {Date} from
    * @param {Date} to
+   * @param {'CASH'|'FNO'} [segment]
    * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
    */
-  async getCandlesRange(symbol, interval, from, to) {
-    return fetchCandleRows(symbol, interval, from, to);
+  async getCandlesRange(symbol, interval, from, to, segment = 'CASH') {
+    return fetchCandleRows(symbol, interval, from, to, segment);
   },
 };
 
 /**
  * Shared by `getCandles`/`getCandlesRange` — one call to /historical/candles for an
- * explicit [start, end) window, parsed into the common Candle[] shape.
- * @param {string} symbol @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval @param {Date} start @param {Date} end
+ * explicit [start, end) window, parsed into the common Candle[] shape. For CASH, the
+ * `groww_symbol` is derived (`NSE-${symbol}`); for FNO, `symbol` must already BE the
+ * exact groww_symbol (there's no derivable convention for option contracts — it comes
+ * from the synced Instrument record).
+ * @param {string} symbol @param {'1m'|'5m'|'15m'|'30m'|'1d'} interval @param {Date} start @param {Date} end @param {'CASH'|'FNO'} [segment]
  * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
  */
-async function fetchCandleRows(symbol, interval, start, end) {
+async function fetchCandleRows(symbol, interval, start, end, segment = 'CASH') {
   const payload = await request('/historical/candles', {
     exchange: 'NSE',
-    segment: 'CASH',
-    groww_symbol: `NSE-${symbol}`,
+    segment,
+    groww_symbol: segment === 'FNO' ? symbol : `NSE-${symbol}`,
     start_time: formatIstTimestamp(start),
     end_time: formatIstTimestamp(end),
     candle_interval: CANDLE_INTERVAL[interval] ?? '5minute',

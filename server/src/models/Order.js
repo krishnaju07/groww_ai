@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ACTIONS, BROKERS, ORDER_STATUSES, TRADE_SOURCES } from '../config/constants.js';
+import { ACTIONS, BROKERS, ORDER_STATUSES, TRADE_SOURCES, OPTION_TYPES } from '../config/constants.js';
 
 /** Broker-level order lifecycle — distinct from Trade, which only records a FILLED economic event. */
 const OrderSchema = new mongoose.Schema(
@@ -9,6 +9,15 @@ const OrderSchema = new mongoose.Schema(
     mode: { type: String, enum: ['paper', 'live'], required: true },
     brokerOrderId: { type: String, default: null },
     symbol: { type: String, required: true },
+    // 'CASH' (default, equity) or 'FNO' (options) — for FNO, `symbol` is the exact
+    // Groww option contract trading_symbol (e.g. 'NIFTY25DEC24500CE'), and the
+    // underlying/strike/expiry/optionType/lotSize fields below describe that contract.
+    segment: { type: String, enum: ['CASH', 'FNO'], default: 'CASH' },
+    underlying: { type: String, default: null },
+    strike: { type: Number, default: null },
+    expiry: { type: Date, default: null },
+    optionType: { type: String, enum: [...OPTION_TYPES, null], default: null },
+    lotSize: { type: Number, default: null },
     action: { type: String, enum: ACTIONS, required: true },
     orderType: { type: String, enum: ['MARKET', 'LIMIT'], default: 'MARKET' },
     quantity: { type: Number, required: true },

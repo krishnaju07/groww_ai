@@ -5,19 +5,27 @@
  * Endpoints verified against https://groww.in/trade-api/docs/curl (Orders,
  * Portfolio, Margin, Live Data sub-pages). Response envelope for all of these
  * (distinct from the token endpoint): { status: 'SUCCESS'|'FAILURE', payload?, error?: {code, message} }.
+ *
+ * Segment-aware since options support was added: every method accepts an optional
+ * `segment` ('CASH' default, or 'FNO') — CASH keeps every prior equity call-shape
+ * identical, FNO threads through for option orders/quotes/positions. For FNO, the
+ * `symbol` passed in is already the exact Groww trading_symbol (e.g. 'NIFTY25DEC24500CE',
+ * sourced from the Instrument collection — see instrumentService.js) — unlike CASH,
+ * it is never suffixed/derived here.
  */
 import { GROWW_BASE_URL, GROWW_API_VERSION, GROWW_ORDER } from '../../config/constants.js';
 import { getAccessToken } from './growwAuth.js';
 import { retryFillCheck } from '../../utils/retryFillCheck.js';
 
-/** @param {string} symbol e.g. 'RELIANCE' @returns {string} Groww order trading_symbol, e.g. 'RELIANCE-EQ' (order endpoints only — quote/LTP endpoints use the bare symbol). */
-function toGrowwTradingSymbol(symbol) {
-  return `${symbol}-EQ`;
+/** @param {string} symbol @param {string} [segment] @returns {string} Groww order trading_symbol — 'RELIANCE-EQ' for CASH, unchanged for FNO (order endpoints only — quote/LTP endpoints use the bare symbol for CASH). */
+function toGrowwTradingSymbol(symbol, segment = GROWW_ORDER.SEGMENT_CASH) {
+  return segment === GROWW_ORDER.SEGMENT_FNO ? symbol : `${symbol}-EQ`;
 }
 
-/** @param {string} tradingSymbol @returns {string} bare symbol, stripping a trailing '-EQ' if present */
-function fromGrowwTradingSymbol(tradingSymbol) {
-  return String(tradingSymbol ?? '').replace(/-EQ$/, '');
+/** @param {string} tradingSymbol @param {string} [segment] @returns {string} bare symbol — strips a trailing '-EQ' for CASH, unchanged for FNO */
+function fromGrowwTradingSymbol(tradingSymbol, segment = GROWW_ORDER.SEGMENT_CASH) {
+  const s = String(tradingSymbol ?? '');
+  return segment === GROWW_ORDER.SEGMENT_FNO ? s : s.replace(/-EQ$/, '');
 }
 
 async function request(path, opts = {}) {
@@ -95,15 +103,16 @@ export function createGrowwBroker() {
      * @returns {Promise<{totalRequirement:number}|null>}
      */
     async checkOrderMargin(o) {
+      const segment = o.segment ?? GROWW_ORDER.SEGMENT_CASH;
       try {
         const payload = await request('/margins/detail/orders', {
           method: 'POST',
-          query: { segment: GROWW_ORDER.SEGMENT_CASH },
+          query: { segment },
           body: [
             {
-              trading_symbol: toGrowwTradingSymbol(o.symbol),
+              trading_symbol: toGrowwTradingSymbol(o.symbol, segment),
               exchange: GROWW_ORDER.EXCHANGE_NSE,
-              segment: GROWW_ORDER.SEGMENT_CASH,
+              segment,
               transaction_type: o.action,
               quantity: o.quantity,
               product: GROWW_ORDER.PRODUCT_MIS,
@@ -120,13 +129,16 @@ export function createGrowwBroker() {
     },
 
     /**
-     * Every position through this app is intraday (MIS) — never CNC/delivery. CNC would
-     * leave the position unmanaged by the broker overnight AND untouched by our own
-     * square-off job (which only looks at what we ourselves tracked), i.e. an actual
-     * T+1 delivery holding despite this being an "intraday only" platform.
+     * Every position through this app is intraday (MIS) — never CNC/delivery, for both
+     * cash equity and options. CNC would leave the position unmanaged by the broker
+     * overnight AND untouched by our own square-off job (which only looks at what we
+     * ourselves tracked), i.e. an actual T+1 delivery holding despite this being an
+     * "intraday only" platform.
      * @param {import('../../types.js').PlaceOrderInput} o
      */
     async placeOrder(o) {
+      const segment = o.segment ?? GROWW_ORDER.SEGMENT_CASH;
+
       if (o.action === GROWW_ORDER.TRANSACTION_BUY) {
         const margin = await this.checkOrderMargin(o);
         if (margin) {
@@ -152,9 +164,9 @@ export function createGrowwBroker() {
       const payload = await request('/order/create', {
         method: 'POST',
         body: {
-          trading_symbol: toGrowwTradingSymbol(o.symbol),
+          trading_symbol: toGrowwTradingSymbol(o.symbol, segment),
           exchange: GROWW_ORDER.EXCHANGE_NSE,
-          segment: GROWW_ORDER.SEGMENT_CASH,
+          segment,
           quantity: o.quantity,
           transaction_type: o.action,
           order_type: o.orderType === 'LIMIT' ? GROWW_ORDER.ORDER_TYPE_LIMIT : GROWW_ORDER.ORDER_TYPE_MARKET,
@@ -165,17 +177,18 @@ export function createGrowwBroker() {
         },
       });
 
-      // MARKET orders on NSE cash equity fill near-instantly — check (with a short retry
-      // backoff, see retryFillCheck.js) so recordLiveFill (orderService.js) actually gets
-      // a filledPrice/filledQuantity instead of always silently no-op'ing. Whatever this
+      // MARKET orders fill near-instantly — check (with a short retry backoff, see
+      // retryFillCheck.js) so recordLiveFill (orderService.js) actually gets a
+      // filledPrice/filledQuantity instead of always silently no-op'ing. Whatever this
       // still misses gets backfilled by orderReconciliationJob.js.
       const brokerOrderId = payload.groww_order_id;
-      const detail = await retryFillCheck(() => this.getOrderStatus(brokerOrderId));
+      const detail = await retryFillCheck(() => this.getOrderStatus(brokerOrderId, segment));
       if (detail) return { brokerOrderId, status: detail.status, filledPrice: detail.filledPrice, filledQuantity: detail.filledQuantity };
       return { brokerOrderId, status: mapStatus(payload.order_status) };
     },
 
     async modifyOrder(orderId, patch) {
+      const segment = patch.segment ?? GROWW_ORDER.SEGMENT_CASH;
       const payload = await request(`/order/modify`, {
         method: 'POST',
         body: {
@@ -183,24 +196,22 @@ export function createGrowwBroker() {
           quantity: patch.quantity,
           price: patch.price,
           order_type: patch.orderType === 'LIMIT' ? GROWW_ORDER.ORDER_TYPE_LIMIT : GROWW_ORDER.ORDER_TYPE_MARKET,
-          segment: GROWW_ORDER.SEGMENT_CASH,
+          segment,
         },
       });
       return { brokerOrderId: orderId, status: mapStatus(payload.order_status) };
     },
 
-    async cancelOrder(orderId) {
+    async cancelOrder(orderId, segment = GROWW_ORDER.SEGMENT_CASH) {
       const payload = await request('/order/cancel', {
         method: 'POST',
-        body: { groww_order_id: orderId, segment: GROWW_ORDER.SEGMENT_CASH },
+        body: { groww_order_id: orderId, segment },
       });
       return { brokerOrderId: orderId, status: mapStatus(payload.order_status ?? 'CANCELLED') };
     },
 
-    async getOrderStatus(orderId) {
-      const payload = await request(`/order/detail/${orderId}`, {
-        query: { segment: GROWW_ORDER.SEGMENT_CASH },
-      });
+    async getOrderStatus(orderId, segment = GROWW_ORDER.SEGMENT_CASH) {
+      const payload = await request(`/order/detail/${orderId}`, { query: { segment } });
       return {
         brokerOrderId: orderId,
         status: mapStatus(payload.order_status),
@@ -209,24 +220,42 @@ export function createGrowwBroker() {
       };
     },
 
+    /**
+     * Fetches CASH and FNO order lists in parallel and merges them (tagged with
+     * `segment`) — a live user can hold both equity and option orders at once since
+     * options support was added, and both must show up in the order book / be reachable
+     * by cancelAllOrders. A segment that errors (e.g. FNO not enabled on the account)
+     * degrades to an empty list for that segment rather than failing the whole call.
+     * @returns {Promise<object[]>}
+     */
     async getOrderList() {
-      const payload = await request('/order/list', { query: { segment: GROWW_ORDER.SEGMENT_CASH } });
-      const orders = payload?.order_list ?? [];
-      return orders.map((o) => ({
-        brokerOrderId: o.groww_order_id,
-        status: mapStatus(o.order_status),
-        symbol: fromGrowwTradingSymbol(o.trading_symbol),
-        action: o.transaction_type,
-        quantity: o.quantity,
-        filledPrice: o.average_fill_price || o.price,
-        filledQuantity: o.filled_quantity,
-        createdAt: o.created_at ? new Date(o.created_at) : null,
-      }));
+      const fetchSegment = async (segment) => {
+        try {
+          const payload = await request('/order/list', { query: { segment } });
+          const orders = payload?.order_list ?? [];
+          return orders.map((o) => ({
+            brokerOrderId: o.groww_order_id,
+            status: mapStatus(o.order_status),
+            symbol: fromGrowwTradingSymbol(o.trading_symbol, segment),
+            action: o.transaction_type,
+            quantity: o.quantity,
+            filledPrice: o.average_fill_price || o.price,
+            filledQuantity: o.filled_quantity,
+            createdAt: o.created_at ? new Date(o.created_at) : null,
+            segment,
+          }));
+        } catch (err) {
+          console.error(`[GrowwBroker] getOrderList(${segment}) failed:`, err.message);
+          return [];
+        }
+      };
+      const [cash, fno] = await Promise.all([fetchSegment(GROWW_ORDER.SEGMENT_CASH), fetchSegment(GROWW_ORDER.SEGMENT_FNO)]);
+      return [...cash, ...fno];
     },
 
-    /** @param {string} orderId @returns {Promise<object[]>} individual fill/execution records for an order (handles partial fills across multiple trades). */
-    async getOrderTrades(orderId) {
-      const payload = await request(`/order/trades/${orderId}`, { query: { segment: GROWW_ORDER.SEGMENT_CASH } });
+    /** @param {string} orderId @param {string} [segment] @returns {Promise<object[]>} individual fill/execution records for an order (handles partial fills across multiple trades). */
+    async getOrderTrades(orderId, segment = GROWW_ORDER.SEGMENT_CASH) {
+      const payload = await request(`/order/trades/${orderId}`, { query: { segment } });
       const trades = payload?.trade_list ?? [];
       return trades.map((t) => ({
         tradeId: t.groww_trade_id,
@@ -236,11 +265,9 @@ export function createGrowwBroker() {
       }));
     },
 
-    /** @param {string} referenceId our own `order_reference_id` passed at creation time @returns {Promise<OrderResult>} */
-    async getOrderStatusByReference(referenceId) {
-      const payload = await request(`/order/status/reference/${referenceId}`, {
-        query: { segment: GROWW_ORDER.SEGMENT_CASH },
-      });
+    /** @param {string} referenceId our own `order_reference_id` passed at creation time @param {string} [segment] @returns {Promise<OrderResult>} */
+    async getOrderStatusByReference(referenceId, segment = GROWW_ORDER.SEGMENT_CASH) {
+      const payload = await request(`/order/status/reference/${referenceId}`, { query: { segment } });
       return {
         brokerOrderId: payload.groww_order_id,
         status: mapStatus(payload.order_status),
@@ -249,20 +276,18 @@ export function createGrowwBroker() {
       };
     },
 
-    async getLTP(symbol) {
+    async getLTP(symbol, segment = GROWW_ORDER.SEGMENT_CASH) {
       const payload = await request('/live-data/quote', {
-        query: { exchange: GROWW_ORDER.EXCHANGE_NSE, segment: GROWW_ORDER.SEGMENT_CASH, trading_symbol: symbol },
+        query: { exchange: GROWW_ORDER.EXCHANGE_NSE, segment, trading_symbol: symbol },
       });
       return payload?.last_price;
     },
 
-    /** @param {string[]} symbols @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
-    async getLTPBatch(symbols) {
+    /** @param {string[]} symbols @param {string} [segment] @returns {Promise<Record<string, number>>} uses the batch LTP endpoint (up to 50 instruments/call) */
+    async getLTPBatch(symbols, segment = GROWW_ORDER.SEGMENT_CASH) {
       if (!symbols.length) return {};
       const exchangeSymbols = symbols.map((s) => `NSE_${s}`).join(',');
-      const payload = await request('/live-data/ltp', {
-        query: { segment: GROWW_ORDER.SEGMENT_CASH, exchange_symbols: exchangeSymbols },
-      });
+      const payload = await request('/live-data/ltp', { query: { segment, exchange_symbols: exchangeSymbols } });
       const out = {};
       for (const s of symbols) {
         const price = payload?.[`NSE_${s}`];
@@ -271,30 +296,46 @@ export function createGrowwBroker() {
       return out;
     },
 
+    /** CASH-only — delivery holdings have no FNO equivalent (options never sit as a T+1 "holding" on this intraday-only platform). */
     async getHoldings() {
       const payload = await request('/holdings/user');
       const holdings = payload?.holdings ?? [];
       return holdings.map((h) => ({ symbol: fromGrowwTradingSymbol(h.trading_symbol), quantity: h.quantity, avgPrice: h.average_price, ltp: 0 }));
     },
 
+    /**
+     * Fetches CASH and FNO positions in parallel and merges them (tagged with `segment`)
+     * — same rationale as getOrderList(). A segment that errors degrades to empty rather
+     * than failing the whole call.
+     */
     async getPositions() {
-      const payload = await request('/positions/user', { query: { segment: GROWW_ORDER.SEGMENT_CASH } });
-      const positions = payload?.positions ?? [];
-      return positions.map((p) => ({
-        symbol: fromGrowwTradingSymbol(p.trading_symbol),
-        quantity: p.quantity,
-        avgPrice: p.net_price,
-        ltp: 0,
-      }));
+      const fetchSegment = async (segment) => {
+        try {
+          const payload = await request('/positions/user', { query: { segment } });
+          const positions = payload?.positions ?? [];
+          return positions.map((p) => ({
+            symbol: fromGrowwTradingSymbol(p.trading_symbol, segment),
+            quantity: p.quantity,
+            avgPrice: p.net_price,
+            ltp: 0,
+            segment,
+          }));
+        } catch (err) {
+          console.error(`[GrowwBroker] getPositions(${segment}) failed:`, err.message);
+          return [];
+        }
+      };
+      const [cash, fno] = await Promise.all([fetchSegment(GROWW_ORDER.SEGMENT_CASH), fetchSegment(GROWW_ORDER.SEGMENT_FNO)]);
+      return [...cash, ...fno];
     },
 
-    /** @param {string} symbol @returns {Promise<Holding|null>} single-symbol position lookup, cheaper than getPositions() when only one symbol is needed. */
-    async getPositionBySymbol(symbol) {
+    /** @param {string} symbol @param {string} [segment] @returns {Promise<Holding|null>} single-symbol position lookup, cheaper than getPositions() when only one symbol is needed. */
+    async getPositionBySymbol(symbol, segment = GROWW_ORDER.SEGMENT_CASH) {
       const payload = await request('/positions/trading-symbol', {
-        query: { segment: GROWW_ORDER.SEGMENT_CASH, exchange: GROWW_ORDER.EXCHANGE_NSE, trading_symbol: toGrowwTradingSymbol(symbol) },
+        query: { segment, exchange: GROWW_ORDER.EXCHANGE_NSE, trading_symbol: toGrowwTradingSymbol(symbol, segment) },
       });
       if (!payload) return null;
-      return { symbol, quantity: payload.quantity, avgPrice: payload.net_price, ltp: 0 };
+      return { symbol, quantity: payload.quantity, avgPrice: payload.net_price, ltp: 0, segment };
     },
 
     async getMargin() {
@@ -313,18 +354,19 @@ export function createGrowwBroker() {
      * (stop-loss market) SELL at `stopLoss`, whichever triggers first cancels the other.
      * Always a SELL — this platform never opens a short position, SELL only ever closes an
      * existing long (see autoTradingService.js), so the protective leg is always an exit.
-     * @param {{symbol:string, quantity:number, stopLoss:number, target:number}} o
+     * @param {{symbol:string, quantity:number, stopLoss:number, target:number, segment?:string}} o
      * @returns {Promise<{smartOrderId:string, smartOrderType:string, status:string}>}
      */
     async placeProtectiveOco(o) {
+      const segment = o.segment ?? GROWW_ORDER.SEGMENT_CASH;
       const payload = await request('/order-advance/create', {
         method: 'POST',
         body: {
           reference_id: `growwai-oco-${Date.now()}`,
           smart_order_type: GROWW_ORDER.SMART_ORDER_TYPE_OCO,
-          segment: GROWW_ORDER.SEGMENT_CASH,
+          segment,
           exchange: GROWW_ORDER.EXCHANGE_NSE,
-          trading_symbol: toGrowwTradingSymbol(o.symbol),
+          trading_symbol: toGrowwTradingSymbol(o.symbol, segment),
           quantity: o.quantity,
           net_position_quantity: o.quantity,
           transaction_type: GROWW_ORDER.TRANSACTION_SELL,
@@ -373,12 +415,13 @@ export function createGrowwBroker() {
       return payload?.orders ?? [];
     },
 
+    /** Cancels pending/placed orders across BOTH segments (getOrderList() already merges CASH+FNO) — a kill switch must reach option orders too, not just equity. */
     async cancelAllOrders() {
       const orders = await this.getOrderList();
       for (const o of orders) {
         if (['PENDING', 'PLACED'].includes(o.status)) {
           try {
-            await this.cancelOrder(o.brokerOrderId);
+            await this.cancelOrder(o.brokerOrderId, o.segment ?? GROWW_ORDER.SEGMENT_CASH);
           } catch (err) {
             console.error(`[GrowwBroker] cancelAllOrders: failed to cancel ${o.brokerOrderId}:`, err.message);
           }
@@ -386,12 +429,18 @@ export function createGrowwBroker() {
       }
     },
 
+    /** Closes open positions across BOTH segments (getPositions() already merges CASH+FNO) — a kill switch must reach option positions too, not just equity. */
     async closeAllPositions() {
       const positions = await this.getPositions();
       for (const p of positions) {
         if (!p.quantity) continue;
         try {
-          await this.placeOrder({ symbol: p.symbol, action: p.quantity > 0 ? 'SELL' : 'BUY', quantity: Math.abs(p.quantity) });
+          await this.placeOrder({
+            symbol: p.symbol,
+            action: p.quantity > 0 ? 'SELL' : 'BUY',
+            quantity: Math.abs(p.quantity),
+            segment: p.segment ?? GROWW_ORDER.SEGMENT_CASH,
+          });
         } catch (err) {
           console.error(`[GrowwBroker] closeAllPositions: failed for ${p.symbol}:`, err.message);
         }

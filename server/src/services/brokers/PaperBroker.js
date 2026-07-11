@@ -33,7 +33,16 @@ export function createPaperBroker(userId) {
 
     /** @param {import('../../types.js').PlaceOrderInput} o */
     async placeOrder(o) {
-      const ltp = await marketData.getLTP(o.symbol);
+      const segment = o.segment ?? 'CASH';
+      const optionFields = {
+        segment,
+        underlying: o.underlying ?? null,
+        strike: o.strike ?? null,
+        expiry: o.expiry ?? null,
+        optionType: o.optionType ?? null,
+        lotSize: o.lotSize ?? null,
+      };
+      const ltp = await marketData.getLTP(o.symbol, segment);
       const price = o.orderType === 'LIMIT' && o.price ? o.price : fillPrice(ltp, o.action);
       const investmentAmount = round2(price * o.quantity);
 
@@ -52,6 +61,7 @@ export function createPaperBroker(userId) {
           broker: 'paper',
           mode: 'paper',
           symbol: o.symbol,
+          ...optionFields,
           action: 'BUY',
           quantity: o.quantity,
           price,
@@ -72,6 +82,7 @@ export function createPaperBroker(userId) {
           stopLoss: o.stopLoss,
           target: o.target,
           aiDecisionId: o.aiDecisionId,
+          ...optionFields,
         });
 
         return { brokerOrderId: String(trade._id), status: 'FILLED', filledPrice: price, filledQuantity: o.quantity };
@@ -96,6 +107,7 @@ export function createPaperBroker(userId) {
         broker: 'paper',
         mode: 'paper',
         symbol: o.symbol,
+        ...optionFields,
         action: 'SELL',
         quantity: o.quantity,
         price,
@@ -166,7 +178,7 @@ export function createPaperBroker(userId) {
 
     async getPositions() {
       const positions = await Position.find({ userId, broker: 'paper' }).lean();
-      return positions.map((p) => ({ symbol: p.symbol, quantity: p.quantity, avgPrice: p.avgBuyPrice, ltp: 0 }));
+      return positions.map((p) => ({ symbol: p.symbol, quantity: p.quantity, avgPrice: p.avgBuyPrice, ltp: 0, segment: p.segment ?? 'CASH' }));
     },
 
     async getMargin() {
@@ -185,7 +197,14 @@ export function createPaperBroker(userId) {
       const positions = await Position.find({ userId, broker: 'paper' }).lean();
       for (const p of positions) {
         try {
-          await this.placeOrder({ symbol: p.symbol, action: 'SELL', quantity: p.quantity, source: 'automatic', triggerReason: 'kill-switch close-all' });
+          await this.placeOrder({
+            symbol: p.symbol,
+            action: 'SELL',
+            quantity: p.quantity,
+            source: 'automatic',
+            triggerReason: 'kill-switch close-all',
+            segment: p.segment ?? 'CASH',
+          });
         } catch (err) {
           console.error(`[PaperBroker] closeAllPositions failed for ${p.symbol}:`, err.message);
         }

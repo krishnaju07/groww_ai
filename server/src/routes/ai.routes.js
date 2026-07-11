@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { decide } from '../services/ai/decisionEngine.js';
+import { decide, decideOptions } from '../services/ai/decisionEngine.js';
 import { AIDecisionLog } from '../models/AIDecisionLog.js';
 import { Trade } from '../models/Trade.js';
 import { getAllSignals } from '../services/ai/signalCache.js';
-import { STOCK_UNIVERSE } from '../config/constants.js';
+import { STOCK_UNIVERSE, OPTION_UNDERLYINGS } from '../config/constants.js';
 import { round2 } from '../utils/format.js';
 
 export const aiRoutes = Router();
@@ -20,6 +20,21 @@ aiRoutes.post(
       throw e;
     }
     const decision = await decide(req.userId, symbol);
+    res.json({ success: true, data: decision });
+  }),
+);
+
+aiRoutes.post(
+  '/decide-options/:underlying',
+  asyncHandler(async (req, res) => {
+    const underlying = req.params.underlying.toUpperCase();
+    if (!OPTION_UNDERLYINGS.some((u) => u.symbol === underlying)) {
+      const e = new Error(`Unknown option underlying: ${underlying}`);
+      e.code = 'UNKNOWN_SYMBOL';
+      e.status = 400;
+      throw e;
+    }
+    const decision = await decideOptions(req.userId, underlying);
     res.json({ success: true, data: decision });
   }),
 );

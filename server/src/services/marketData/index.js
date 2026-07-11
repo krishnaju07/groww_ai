@@ -72,56 +72,58 @@ export const marketData = {
     return { provider: primary.name, degraded, lastFallbackReason: degraded ? fallbackState.reason : null };
   },
 
-  /** @param {string} symbol @returns {Promise<number>} */
-  async getLTP(symbol) {
-    const cached = ltpCache.get(symbol);
+  /** @param {string} symbol @param {'CASH'|'FNO'} [segment] @returns {Promise<number>} */
+  async getLTP(symbol, segment = 'CASH') {
+    const key = `${segment}:${symbol}`;
+    const cached = ltpCache.get(key);
     if (cached && Date.now() - cached.at < LTP_TTL_MS) return cached.value;
     const primary = await getPrimary();
     const value = await withFallback(
       primary,
-      () => primary.getLTP(symbol),
+      () => primary.getLTP(symbol, segment),
       () => MockProvider.getLTP(symbol),
       `getLTP(${symbol})`,
     );
-    ltpCache.set(symbol, { value, at: Date.now() });
+    ltpCache.set(key, { value, at: Date.now() });
     return value;
   },
 
-  /** @param {string[]} symbols @returns {Promise<Record<string, number>>} */
-  async getLTPBatch(symbols) {
+  /** @param {string[]} symbols @param {'CASH'|'FNO'} [segment] @returns {Promise<Record<string, number>>} */
+  async getLTPBatch(symbols, segment = 'CASH') {
     const uncached = symbols.filter((s) => {
-      const c = ltpCache.get(s);
+      const c = ltpCache.get(`${segment}:${s}`);
       return !c || Date.now() - c.at >= LTP_TTL_MS;
     });
     if (uncached.length) {
       const primary = await getPrimary();
       const fresh = await withFallback(
         primary,
-        () => primary.getLTPBatch(uncached),
+        () => primary.getLTPBatch(uncached, segment),
         () => MockProvider.getLTPBatch(uncached),
         `getLTPBatch(${uncached.length})`,
       );
-      for (const [s, v] of Object.entries(fresh)) ltpCache.set(s, { value: v, at: Date.now() });
+      for (const [s, v] of Object.entries(fresh)) ltpCache.set(`${segment}:${s}`, { value: v, at: Date.now() });
     }
     const out = {};
-    for (const s of symbols) out[s] = ltpCache.get(s)?.value;
+    for (const s of symbols) out[s] = ltpCache.get(`${segment}:${s}`)?.value;
     return out;
   },
 
   /**
-   * @param {string} symbol
+   * @param {string} symbol for FNO, the contract's `growwSymbol` (see GrowwProvider.getCandles)
    * @param {'1m'|'5m'|'15m'|'30m'|'1d'} [interval]
    * @param {number} [limit]
+   * @param {'CASH'|'FNO'} [segment]
    * @returns {Promise<import('./MarketDataProvider.js').Candle[]>}
    */
-  async getCandles(symbol, interval = '5m', limit = 100) {
-    const key = `${symbol}:${interval}:${limit}`;
+  async getCandles(symbol, interval = '5m', limit = 100, segment = 'CASH') {
+    const key = `${segment}:${symbol}:${interval}:${limit}`;
     const cached = candleCache.get(key);
     if (cached && Date.now() - cached.at < CANDLE_TTL_MS) return cached.value;
     const primary = await getPrimary();
     const value = await withFallback(
       primary,
-      () => primary.getCandles(symbol, interval, limit),
+      () => primary.getCandles(symbol, interval, limit, segment),
       () => MockProvider.getCandles(symbol, interval, limit),
       `getCandles(${symbol})`,
     );

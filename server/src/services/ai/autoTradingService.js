@@ -9,13 +9,13 @@
  * Every order still routes through riskManager.canTrade() via orderService.placeOrder()
  * — the same choke point manual and AI-triggered orders use.
  */
-import { DEFAULT_USER_ID, STOCK_UNIVERSE } from '../../config/constants.js';
+import { DEFAULT_USER_ID, STOCK_UNIVERSE, OPTION_UNDERLYINGS } from '../../config/constants.js';
 import { UserSettings } from '../../models/UserSettings.js';
 import { Position } from '../../models/Position.js';
 import { AIDecisionLog } from '../../models/AIDecisionLog.js';
-import { buildContext } from './contextBuilder.js';
-import { scoreQuant } from './aiSignalService.js';
-import { callProvider } from './decisionEngine.js';
+import { buildContext, buildOptionsContext } from './contextBuilder.js';
+import { scoreQuant, scoreQuantOptions } from './aiSignalService.js';
+import { callProvider, callProviderOptions, resolveOptionContract } from './decisionEngine.js';
 import { placeOrder } from '../orderService.js';
 import { effectiveMode } from '../brokers/tradingModeService.js';
 import { isMarketOpen } from '../../utils/marketHours.js';
@@ -50,6 +50,58 @@ async function confirmWithLlm(userId, symbol, providerKey, quantDecision, ctx) {
     target: agreed ? quantDecision.target : null,
     reason: llm
       ? `Ensemble ${agreed ? 'agreed' : 'disagreed'}: Quant=${quantDecision.action} (${quantDecision.reason}); ${llm.providerLabel}=${llm.action} (${llm.reason})`
+      : `LLM confirmation unavailable (${llmError}) — trade skipped, confirmation was required.`,
+    confidence: agreed ? Math.round((quantDecision.confidence + llm.confidence) / 2) : 0,
+    justification: llm?.justification ?? '',
+    scoreBreakdown: llm?.scoreBreakdown ?? undefined,
+    models: [
+      { name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence },
+      ...(llm ? [{ name: llm.providerLabel, action: llm.action, confidence: llm.confidence }] : []),
+    ],
+    indicatorsSnapshot: ctx,
+  });
+
+  return { agreed, log };
+}
+
+/**
+ * Options counterpart to confirmWithLlm() — an agreement additionally requires the
+ * LLM to have picked the SAME option side (CE vs PE) as Quant, not just the same
+ * action (both are always 'BUY' when this is called, since WAIT never reaches here).
+ * @param {string} userId @param {string} underlyingSymbol
+ * @param {Awaited<ReturnType<typeof resolveOptionContract>>} contract @param {string} providerKey
+ * @param {import('../../types.js').AiOptionsDecision} quantDecision
+ * @param {import('../../types.js').OptionsIndicatorSnapshot} ctx
+ * @returns {Promise<{agreed:boolean, log:object}>}
+ */
+async function confirmOptionsWithLlm(userId, underlyingSymbol, contract, providerKey, quantDecision, ctx) {
+  let llm = null;
+  let llmError = null;
+  try {
+    llm = await callProviderOptions(providerKey, ctx);
+  } catch (err) {
+    llmError = err.message;
+  }
+
+  const agreed = Boolean(llm) && llm.action === quantDecision.action && llm.optionType === quantDecision.optionType;
+  const optionType = agreed ? quantDecision.optionType : null;
+  const tradingSymbol = optionType ? contract[optionType.toLowerCase()].tradingSymbol : null;
+
+  const log = await AIDecisionLog.create({
+    userId,
+    symbol: tradingSymbol ?? `${contract.underlying}-${contract.strike}`,
+    segment: 'FNO',
+    underlying: contract.underlying,
+    strike: contract.strike,
+    expiry: contract.expiry,
+    optionType,
+    lotSize: contract.lotSize,
+    action: agreed ? quantDecision.action : 'WAIT',
+    quantity: agreed ? quantDecision.quantity : 0,
+    stopLoss: agreed ? quantDecision.stopLoss : null,
+    target: agreed ? quantDecision.target : null,
+    reason: llm
+      ? `Ensemble ${agreed ? 'agreed' : 'disagreed'}: Quant=${quantDecision.action}${quantDecision.optionType ? ` ${quantDecision.optionType}` : ''} (${quantDecision.reason}); ${llm.providerLabel}=${llm.action}${llm.optionType ? ` ${llm.optionType}` : ''} (${llm.reason})`
       : `LLM confirmation unavailable (${llmError}) — trade skipped, confirmation was required.`,
     confidence: agreed ? Math.round((quantDecision.confidence + llm.confidence) / 2) : 0,
     justification: llm?.justification ?? '',
@@ -193,6 +245,101 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       }
     } catch (err) {
       console.error(`[autoTradingService] tick failed for ${symbol}:`, err.message);
+    }
+  }
+
+  // Options: an underlying (e.g. NIFTY) reuses the same overall maxOpenPositions budget
+  // and requireAiConfirmation/minConfidence settings as equity. Unlike equity, there is
+  // no SELL branch here — a fresh options entry is the only thing this decides; exiting
+  // an existing option position is handled the same way as equity, automatically, by
+  // positionGuardianJob/squareOffJob watching the Position's stored stopLoss/target.
+  const openUnderlyings = new Set(openPositions.filter((p) => p.segment === 'FNO').map((p) => p.underlying));
+
+  for (const { symbol: underlyingSymbol } of OPTION_UNDERLYINGS) {
+    try {
+      if (openUnderlyings.has(underlyingSymbol)) continue;
+      if (openPositionCount >= settings.autoInvest.maxOpenPositions) continue;
+
+      const contract = await resolveOptionContract(underlyingSymbol);
+      const ctx = await buildOptionsContext(contract, userId);
+      const quantDecision = scoreQuantOptions(ctx, settings.autoInvest.amountPerTrade, riskConfig.maxLossPerTrade);
+
+      if (quantDecision.action === 'WAIT') continue;
+
+      if (['closing', 'after-square-off'].includes(ctx.sessionPhase)) {
+        results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_TOO_CLOSE_TO_SQUAREOFF' });
+        continue;
+      }
+      if (quantDecision.confidence < minConfidence) {
+        results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_LOW_CONFIDENCE', confidence: quantDecision.confidence });
+        continue;
+      }
+
+      let log;
+      if (settings.autoInvest.requireAiConfirmation) {
+        const cooldownKey = `OPT:${underlyingSymbol}:${quantDecision.optionType}`;
+        const lastAttempt = lastConfirmAttempt.get(cooldownKey) ?? 0;
+        if (Date.now() - lastAttempt < AI_CONFIRM_COOLDOWN_MS) continue;
+        lastConfirmAttempt.set(cooldownKey, Date.now());
+
+        const { agreed, log: ensembleLog } = await confirmOptionsWithLlm(userId, underlyingSymbol, contract, settings.aiProvider, quantDecision, ctx);
+        log = ensembleLog;
+        if (!agreed) {
+          results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_NO_ENSEMBLE_AGREEMENT' });
+          continue;
+        }
+        if (log.confidence < minConfidence) {
+          results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_LOW_CONFIDENCE', confidence: log.confidence });
+          continue;
+        }
+      } else {
+        log = await AIDecisionLog.create({
+          userId,
+          symbol: contract[quantDecision.optionType.toLowerCase()].tradingSymbol,
+          segment: 'FNO',
+          underlying: contract.underlying,
+          strike: contract.strike,
+          expiry: contract.expiry,
+          optionType: quantDecision.optionType,
+          lotSize: contract.lotSize,
+          action: quantDecision.action,
+          quantity: quantDecision.quantity,
+          stopLoss: quantDecision.stopLoss,
+          target: quantDecision.target,
+          reason: quantDecision.reason,
+          confidence: quantDecision.confidence,
+          models: [{ name: 'Quant', action: quantDecision.action, confidence: quantDecision.confidence }],
+          indicatorsSnapshot: ctx,
+        });
+      }
+
+      const tradingSymbol = contract[log.optionType.toLowerCase()].tradingSymbol;
+
+      try {
+        const order = await placeOrder(userId, {
+          symbol: tradingSymbol,
+          action: 'BUY',
+          quantity: log.quantity,
+          stopLoss: log.stopLoss,
+          target: log.target,
+          source: 'automatic',
+          triggerReason: log.reason,
+          aiDecisionId: log._id,
+          segment: 'FNO',
+        });
+        log.resultingOrderId = order.orderId;
+        log.riskResult = { allowed: true, reason: '' };
+        await log.save();
+        openUnderlyings.add(underlyingSymbol);
+        openPositionCount += 1;
+        results.push({ symbol: underlyingSymbol, action: 'BUY', status: order.status });
+      } catch (err) {
+        log.riskResult = { allowed: false, reason: err.message };
+        await log.save();
+        results.push({ symbol: underlyingSymbol, action: 'BUY', status: 'BLOCKED', reason: err.message });
+      }
+    } catch (err) {
+      console.error(`[autoTradingService] options tick failed for ${underlyingSymbol}:`, err.message);
     }
   }
 

@@ -15,19 +15,16 @@ const SELL_THRESHOLD = -3;
 const TRACK_RECORD_MIN_SAMPLE = 5;
 
 /**
- * Deterministic technical-indicator scorer — no LLM call, so it's cheap enough
- * to run every 30s in the auto-trading cron. Also used as Claude's cross-check
- * partner (a live BUY/SELL should ideally have both models agree). This is the
- * scorer actually driving position sizing for every automated trade (autoTradingService
- * places orders using ITS quantity, not the LLM's advisory one) — so its stop/target/
- * sizing logic is the real risk-control surface, not just a cheap fallback.
- * @param {string} symbol
- * @param {import('../../types.js').IndicatorSnapshot} ctx
- * @param {number} [investmentAmount] soft cap — never invest more than this much capital in one trade
- * @param {number} [maxLossPerTrade] hard cap — quantity is sized so a full stop-loss hit never loses more than this
- * @returns {import('../../types.js').AiDecision}
+ * Shared directional scorer — everything about the setup EXCEPT position sizing
+ * (stop/target/quantity) and the track-record confidence nudge, which differ enough
+ * between equity (priced/sized in the stock's own ₹, single track record) and options
+ * (priced in premium, sized in lots, a track record PER SIDE that isn't known until
+ * this function's score picks a direction) that each caller applies those separately —
+ * see applyTrackRecordAdjustment() and scoreQuant()/scoreQuantOptions() below.
+ * @param {import('../../types.js').IndicatorSnapshot|import('../../types.js').OptionsIndicatorSnapshot} ctx
+ * @returns {{score:number, confidence:number, reasons:string[]}}
  */
-export function scoreQuant(symbol, ctx, investmentAmount = 5000, maxLossPerTrade = DEFAULT_RISK_CONFIG.maxLossPerTrade) {
+function computeDirectionalSignal(ctx) {
   let score = 0;
   const reasons = [];
 
@@ -78,10 +75,11 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000, maxLossPerTrade
     reasons.push(`Supertrend bearish (₹${ctx.supertrend.value})`);
   }
 
-  if (ctx.levels.support && ctx.ltp <= ctx.levels.support * 1.005) {
+  const refPrice = ctx.ltp ?? ctx.spotLtp;
+  if (ctx.levels.support && refPrice <= ctx.levels.support * 1.005) {
     score += 1;
     reasons.push('price near support');
-  } else if (ctx.levels.resistance && ctx.ltp >= ctx.levels.resistance * 0.995) {
+  } else if (ctx.levels.resistance && refPrice >= ctx.levels.resistance * 0.995) {
     score -= 1;
     reasons.push('price near resistance');
   }
@@ -97,23 +95,51 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000, maxLossPerTrade
   const volumeConfirmed = ctx.volumeRatio >= 1.2;
   if (volumeConfirmed) reasons.push(`volume ${ctx.volumeRatio}x average confirms move`);
 
-  let confidence = Math.min(95, Math.round((Math.abs(score) / 10) * 100 * (volumeConfirmed ? 1 : 0.7)));
+  const confidence = Math.min(95, Math.round((Math.abs(score) / 10) * 100 * (volumeConfirmed ? 1 : 0.7)));
 
-  // This symbol's own track record nudges confidence — a technically-identical setup
-  // deserves more skepticism on a stock whose past AI calls have gone badly, and can
-  // afford a touch more trust where they've gone well. Bounded (±30% relative) so it can
-  // never flip a WAIT-worthy signal into an actionable one (or vice versa) on its own,
-  // and requires a real sample size so a couple of lucky/unlucky trades don't swing it.
-  const tr = ctx.trackRecord;
+  return { score, confidence, reasons };
+}
+
+/**
+ * The track record nudges confidence — a technically-identical setup deserves more
+ * skepticism where past AI calls have gone badly, and can afford a touch more trust
+ * where they've gone well. Bounded (±30% relative) so it can never flip a WAIT-worthy
+ * signal into an actionable one (or vice versa) on its own, and requires a real sample
+ * size so a couple of lucky/unlucky trades don't swing it. Mutates `reasons` in place
+ * (appends an explanation) when the adjustment actually applies.
+ * @param {number} confidence @param {{totalClosed:number, winRate:number|null}|undefined} tr @param {string[]} reasons @param {string} [label]
+ * @returns {number}
+ */
+function applyTrackRecordAdjustment(confidence, tr, reasons, label = "this symbol's own") {
   if (tr && tr.totalClosed >= TRACK_RECORD_MIN_SAMPLE) {
     if (tr.winRate < 40) {
-      confidence = Math.round(confidence * 0.7);
-      reasons.push(`this symbol's own track record is weak (${tr.winRate}% over ${tr.totalClosed} trades) — confidence reduced`);
-    } else if (tr.winRate > 65) {
-      confidence = Math.min(95, Math.round(confidence * 1.1));
-      reasons.push(`this symbol's own track record is strong (${tr.winRate}% over ${tr.totalClosed} trades)`);
+      reasons.push(`${label} track record is weak (${tr.winRate}% over ${tr.totalClosed} trades) — confidence reduced`);
+      return Math.round(confidence * 0.7);
+    }
+    if (tr.winRate > 65) {
+      reasons.push(`${label} track record is strong (${tr.winRate}% over ${tr.totalClosed} trades)`);
+      return Math.min(95, Math.round(confidence * 1.1));
     }
   }
+  return confidence;
+}
+
+/**
+ * Deterministic technical-indicator scorer — no LLM call, so it's cheap enough
+ * to run every 30s in the auto-trading cron. Also used as Claude's cross-check
+ * partner (a live BUY/SELL should ideally have both models agree). This is the
+ * scorer actually driving position sizing for every automated trade (autoTradingService
+ * places orders using ITS quantity, not the LLM's advisory one) — so its stop/target/
+ * sizing logic is the real risk-control surface, not just a cheap fallback.
+ * @param {string} symbol
+ * @param {import('../../types.js').IndicatorSnapshot} ctx
+ * @param {number} [investmentAmount] soft cap — never invest more than this much capital in one trade
+ * @param {number} [maxLossPerTrade] hard cap — quantity is sized so a full stop-loss hit never loses more than this
+ * @returns {import('../../types.js').AiDecision}
+ */
+export function scoreQuant(symbol, ctx, investmentAmount = 5000, maxLossPerTrade = DEFAULT_RISK_CONFIG.maxLossPerTrade) {
+  const { score, confidence: baseConfidence, reasons } = computeDirectionalSignal(ctx);
+  const confidence = applyTrackRecordAdjustment(baseConfidence, ctx.trackRecord, reasons);
 
   // Real volatility (ATR), not an arbitrary flat percentage, sizes the stop/target — falls
   // back to the flat percentage only when there isn't enough candle history for ATR yet.
@@ -158,5 +184,71 @@ export function scoreQuant(symbol, ctx, investmentAmount = 5000, maxLossPerTrade
     target: round2(ctx.ltp),
     reason: reasons.length ? reasons.join('; ') : 'No strong directional signal',
     confidence: Math.round(Math.abs(score) * 10),
+  };
+}
+
+// Options can't be shorted by this platform (BUY always means "buy calls/puts to
+// open") — a bullish underlying signal means buy the CALL, a bearish one means buy
+// the PUT. Falls back to a flat percent-of-premium when the contract doesn't have
+// enough of its own candle history yet for a premium ATR (see contextBuilder.buildOptionsContext).
+const OPTIONS_STOP_LOSS_PERCENT = 30; // of premium
+const OPTIONS_TARGET_PERCENT = 60; // of premium — keeps the same 2:1 reward:risk ratio
+const OPTIONS_ATR_STOP_MULTIPLIER = 1.5;
+const OPTIONS_ATR_TARGET_MULTIPLIER = 3;
+const DIRECTIONAL_THRESHOLD = 3; // |score| at/above this counts as a real directional signal
+
+/**
+ * Options counterpart to scoreQuant() — same directional signal (computed on the
+ * underlying index, via computeDirectionalSignal), but sizing/stop/target are in
+ * PREMIUM terms and quantity is in whole lots. Always a fresh-entry decision (BUY a
+ * CE or PE, or WAIT) — exiting an existing option position is handled the same way
+ * as equity, by positionGuardianJob/squareOffJob watching the Position's stored
+ * stopLoss/target, not by this function.
+ * @param {import('../../types.js').OptionsIndicatorSnapshot} ctx
+ * @param {number} [investmentAmount] soft cap — never invest more than this much capital in one trade
+ * @param {number} [maxLossPerTrade] hard cap — quantity is sized so a full stop-loss hit never loses more than this
+ * @returns {import('../../types.js').AiOptionsDecision}
+ */
+export function scoreQuantOptions(ctx, investmentAmount = 5000, maxLossPerTrade = DEFAULT_RISK_CONFIG.maxLossPerTrade) {
+  const { score, confidence: baseConfidence, reasons } = computeDirectionalSignal(ctx);
+
+  if (Math.abs(score) < DIRECTIONAL_THRESHOLD) {
+    return {
+      action: 'WAIT',
+      optionType: null,
+      quantity: 0,
+      stopLoss: round2(ctx.ce.premium),
+      target: round2(ctx.ce.premium),
+      reason: reasons.length ? reasons.join('; ') : 'No strong directional signal',
+      confidence: Math.round(Math.abs(score) * 10),
+    };
+  }
+
+  // score > 0 = bullish underlying → buy the CALL; score < 0 = bearish → buy the PUT.
+  const optionType = score > 0 ? 'CE' : 'PE';
+  const side = optionType === 'CE' ? ctx.ce : ctx.pe;
+  const confidence = applyTrackRecordAdjustment(baseConfidence, side.trackRecord, reasons, `this direction's (${ctx.underlying} ${optionType})`);
+
+  const stopDistance = side.premiumAtr > 0 ? side.premiumAtr * OPTIONS_ATR_STOP_MULTIPLIER : side.premium * (OPTIONS_STOP_LOSS_PERCENT / 100);
+  const targetDistance = side.premiumAtr > 0 ? side.premiumAtr * OPTIONS_ATR_TARGET_MULTIPLIER : side.premium * (OPTIONS_TARGET_PERCENT / 100);
+
+  // Same two-cap sizing as equity (never invest more than the budget, never risk more
+  // than maxLossPerTrade on a full stop), but per-LOT (premium × lotSize is the cost/risk
+  // of one lot), then converted to a total contract quantity.
+  const costPerLot = side.premium * ctx.lotSize;
+  const riskPerLot = stopDistance * ctx.lotSize;
+  const budgetBasedLots = costPerLot > 0 ? Math.max(1, Math.floor(investmentAmount / costPerLot)) : 1;
+  const riskBasedLots = riskPerLot > 0 ? Math.max(1, Math.floor(maxLossPerTrade / riskPerLot)) : budgetBasedLots;
+  const lots = Math.max(1, Math.min(budgetBasedLots, riskBasedLots));
+  const quantity = lots * ctx.lotSize;
+
+  return {
+    action: 'BUY',
+    optionType,
+    quantity,
+    stopLoss: round2(Math.max(0, side.premium - stopDistance)),
+    target: round2(side.premium + targetDistance),
+    reason: `${optionType === 'CE' ? 'Bullish' : 'Bearish'} underlying signal — buying ${optionType}; ${reasons.join('; ')}`,
+    confidence,
   };
 }

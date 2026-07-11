@@ -38,7 +38,15 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
   const autoExit = settings.autoExit ?? {};
   let ltps;
   try {
-    ltps = await marketData.getLTPBatch(positions.map((p) => p.symbol));
+    // Split by segment — a live user can now hold both equity and option positions at
+    // once, and the batch LTP endpoint needs the right segment per contract.
+    const cashSymbols = positions.filter((p) => (p.segment ?? 'CASH') === 'CASH').map((p) => p.symbol);
+    const fnoSymbols = positions.filter((p) => p.segment === 'FNO').map((p) => p.symbol);
+    const [cashLtps, fnoLtps] = await Promise.all([
+      marketData.getLTPBatch(cashSymbols, 'CASH'),
+      marketData.getLTPBatch(fnoSymbols, 'FNO'),
+    ]);
+    ltps = { ...cashLtps, ...fnoLtps };
   } catch (err) {
     // In live mode a market-data outage now throws instead of masking as mock prices —
     // skip this tick entirely (retried in 15s) rather than checking stops against fake data.
@@ -54,10 +62,12 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
       // trigger beat our 15s poll), detect it here and record the fill — never place a
       // second, redundant SELL against a position Groww already closed on its own side.
       if (position.smartOrderId && broker && typeof broker.getSmartOrderStatus === 'function') {
-        const smartStatus = await broker.getSmartOrderStatus(position.smartOrderId, position.smartOrderType).catch((err) => {
-          console.error(`[positionGuardianJob] getSmartOrderStatus failed for ${position.symbol}:`, err.message);
-          return null;
-        });
+        const smartStatus = await broker
+          .getSmartOrderStatus(position.smartOrderId, position.smartOrderType, position.segment ?? 'CASH')
+          .catch((err) => {
+            console.error(`[positionGuardianJob] getSmartOrderStatus failed for ${position.symbol}:`, err.message);
+            return null;
+          });
         if (smartStatus?.status === 'COMPLETED') {
           const ltpAtDetection = ltps[position.symbol];
           // The status payload doesn't expose the actual exit fill price — approximate
@@ -67,7 +77,19 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
           const tradeId = await recordLiveFill(
             userId,
             brokerName,
-            { symbol: position.symbol, action: 'SELL', quantity: position.quantity, source: 'automatic', triggerReason: 'Broker-side stop-loss/target (OCO) executed' },
+            {
+              symbol: position.symbol,
+              action: 'SELL',
+              quantity: position.quantity,
+              source: 'automatic',
+              triggerReason: 'Broker-side stop-loss/target (OCO) executed',
+              segment: position.segment ?? 'CASH',
+              underlying: position.underlying,
+              strike: position.strike,
+              expiry: position.expiry,
+              optionType: position.optionType,
+              lotSize: position.lotSize,
+            },
             { status: 'FILLED', filledPrice: approxFillPrice, filledQuantity: position.quantity },
           );
           results.push({ symbol: position.symbol, status: 'CLOSED_BY_BROKER_OCO', tradeId: tradeId ? String(tradeId) : null });
@@ -113,6 +135,7 @@ export async function runPositionGuardianTick(userId = DEFAULT_USER_ID) {
         quantity: position.quantity,
         source: 'automatic',
         triggerReason,
+        segment: position.segment ?? 'CASH',
       });
       results.push({ symbol: position.symbol, status: order.status, reason: triggerReason });
     } catch (err) {

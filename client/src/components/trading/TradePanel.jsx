@@ -9,11 +9,13 @@ import { toast } from '../../store/useToastStore.js';
 import { useSettingsStore } from '../../store/useSettingsStore.js';
 
 /**
- * @param {{symbol:string, ltp:number, decision:object|null, onOrderPlaced:()=>void}} props
+ * @param {{symbol:string, ltp:number, decision:object|null, onOrderPlaced:()=>void, segment?:'CASH'|'FNO', lotSize?:number|null}} props
  */
-export function TradePanel({ symbol, ltp, decision, onOrderPlaced }) {
+export function TradePanel({ symbol, ltp, decision, onOrderPlaced, segment = 'CASH', lotSize = null }) {
+  const isOptions = segment === 'FNO';
+  const defaultQty = isOptions && lotSize ? lotSize : 1;
   const [action, setAction] = useState('BUY');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(defaultQty);
   const [stopLoss, setStopLoss] = useState(0);
   const [target, setTarget] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -24,9 +26,10 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced }) {
   // Reset price-tied fields whenever the symbol changes — otherwise a stop-loss/target
   // computed for the previous (differently-priced) symbol silently carries over.
   useEffect(() => {
-    setQuantity(1);
+    setQuantity(defaultQty);
     setStopLoss(0);
     setTarget(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
   useEffect(() => {
@@ -60,6 +63,7 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced }) {
         triggerReason: decision && decision.action === action ? decision.reason : 'manual',
         aiDecisionId: decision && decision.action === action ? decision.decisionId : undefined,
         confirmRealMoney,
+        segment,
       });
       toast.success(`${action} ${quantity} ${symbol} placed${confirmRealMoney ? ' — REAL MONEY' : ''}`);
       onOrderPlaced?.();
@@ -95,14 +99,20 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced }) {
 
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted">Quantity</label>
+          <label className="mb-1 block text-xs font-medium text-muted">
+            Quantity{isOptions && lotSize ? ` (lot size ${lotSize})` : ''}
+          </label>
           <input
             type="number"
-            min={1}
+            min={isOptions && lotSize ? lotSize : 1}
+            step={isOptions && lotSize ? lotSize : 1}
             value={quantity}
             onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
             className={INPUT}
           />
+          {isOptions && lotSize && quantity % lotSize !== 0 && (
+            <div className="mt-1 text-xs text-danger">Must be a multiple of the lot size ({lotSize}).</div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

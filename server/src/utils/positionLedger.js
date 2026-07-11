@@ -23,16 +23,40 @@ function toObjectIdOrNull(id) {
 
 /**
  * @param {{userId:string, broker:string, symbol:string, quantity:number, investmentAmount:number,
- *   price:number, stopLoss?:number|null, target?:number|null, aiDecisionId?:string|null}} input
+ *   price:number, stopLoss?:number|null, target?:number|null, aiDecisionId?:string|null,
+ *   segment?:string, underlying?:string|null, strike?:number|null, expiry?:Date|null,
+ *   optionType?:string|null, lotSize?:number|null}} input
  * @returns {Promise<import('mongoose').Document>} the updated/created Position document
  */
-export async function applyBuyToPosition({ userId, broker, symbol, quantity, investmentAmount, price, stopLoss, target, aiDecisionId }) {
+export async function applyBuyToPosition({
+  userId,
+  broker,
+  symbol,
+  quantity,
+  investmentAmount,
+  price,
+  stopLoss,
+  target,
+  aiDecisionId,
+  segment,
+  underlying,
+  strike,
+  expiry,
+  optionType,
+  lotSize,
+}) {
   const pipeline = [
     {
       $set: {
         userId: { $ifNull: ['$userId', userId] },
         broker: { $ifNull: ['$broker', broker] },
         symbol: { $ifNull: ['$symbol', symbol] },
+        segment: { $ifNull: ['$segment', segment ?? 'CASH'] },
+        underlying: { $ifNull: ['$underlying', underlying ?? null] },
+        strike: { $ifNull: ['$strike', strike ?? null] },
+        expiry: { $ifNull: ['$expiry', expiry ?? null] },
+        optionType: { $ifNull: ['$optionType', optionType ?? null] },
+        lotSize: { $ifNull: ['$lotSize', lotSize ?? null] },
         quantity: { $add: [{ $ifNull: ['$quantity', 0] }, quantity] },
         investedAmount: { $add: [{ $ifNull: ['$investedAmount', 0] }, investmentAmount] },
         highestPriceSeen: { $max: [{ $ifNull: ['$highestPriceSeen', 0] }, price] },

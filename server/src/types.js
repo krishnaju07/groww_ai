@@ -101,6 +101,52 @@
  */
 
 /**
+ * @typedef {Object} OptionSideSnapshot
+ * @property {string} tradingSymbol the exact Groww option contract symbol
+ * @property {number} premium the contract's own current LTP
+ * @property {number} premiumAtr 0 if the contract doesn't have enough own candle history yet
+ * @property {{totalClosed:number, winRate:number|null, avgPnl:number|null}} trackRecord keyed by (underlying, this side's optionType)
+ */
+
+/**
+ * @typedef {Object} OptionsIndicatorSnapshot
+ * @property {string} underlying e.g. 'NIFTY'
+ * @property {number} strike
+ * @property {Date} expiry
+ * @property {number} lotSize
+ * @property {number} spotLtp underlying index's current price
+ * @property {OptionSideSnapshot} ce the CALL contract at this strike/expiry
+ * @property {OptionSideSnapshot} pe the PUT contract at this strike/expiry
+ * @property {number} rsi RSI(14) computed on the UNDERLYING's candles
+ * @property {{macd:number, signal:number, histogram:number}} macd on the UNDERLYING's candles
+ * @property {number} volumeRatio on the UNDERLYING's candles
+ * @property {'UP'|'DOWN'|'SIDEWAYS'} trendShortTerm 5m underlying trend
+ * @property {'UP'|'DOWN'|'SIDEWAYS'} trendMediumTerm 15m underlying trend
+ * @property {'UP'|'DOWN'|'SIDEWAYS'} trendLongTerm 30m underlying trend
+ * @property {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}} psar on the UNDERLYING
+ * @property {{value:number, trend:'UP'|'DOWN'|'SIDEWAYS'}} supertrend on the UNDERLYING
+ * @property {number} atr on the UNDERLYING (price units, not premium units)
+ * @property {number} minutesToSquareOff
+ * @property {'pre-market'|'opening'|'mid-day'|'closing'|'after-square-off'} sessionPhase
+ * @property {{support:number, resistance:number}} levels on the UNDERLYING
+ * @property {string} niftySentiment
+ * @property {string[]} news
+ */
+
+/**
+ * @typedef {Object} AiOptionsDecision
+ * @property {'BUY'|'WAIT'} action BUY always means "buy calls/puts to open" — exits are handled by positionGuardianJob/squareOffJob like any other position, not by this decision
+ * @property {'CE'|'PE'|null} optionType required when action is BUY
+ * @property {number} quantity total contract quantity (a multiple of lotSize), 0 for WAIT
+ * @property {number} stopLoss absolute premium value
+ * @property {number} target absolute premium value
+ * @property {string} reason
+ * @property {number} confidence 0-100
+ * @property {string} [justification]
+ * @property {ScoreBreakdown} [scoreBreakdown]
+ */
+
+/**
  * @typedef {Object} RiskConfigShape
  * @property {number} maxLossPerDay
  * @property {number} maxLossPerTrade

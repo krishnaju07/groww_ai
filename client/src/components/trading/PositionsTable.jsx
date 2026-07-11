@@ -34,7 +34,14 @@ export function PositionsTable({ positions = [], signals = {} }) {
                 const aiView = aiViewFor(signals[p.symbol]);
                 return (
                   <tr key={p.symbol} className="border-t border-border/50">
-                    <td className="py-2 font-medium">{p.symbol}</td>
+                    <td className="py-2 font-medium">
+                      {p.symbol}
+                      {p.segment === 'FNO' && (
+                        <span className="ml-1.5 rounded bg-accent/10 px-1.5 py-0.5 text-xs font-semibold text-accent">
+                          {p.strike} {p.optionType}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2">{p.quantity}</td>
                     <td className="py-2">{formatINR(p.avgBuyPrice)}</td>
                     <td className="py-2">{formatINR(p.ltp)}</td>

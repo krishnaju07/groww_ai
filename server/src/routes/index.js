@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { healthRoutes } from './health.routes.js';
 import { stocksRoutes } from './stocks.routes.js';
+import { optionsRoutes } from './options.routes.js';
 import { dashboardRoutes } from './dashboard.routes.js';
 import { portfolioRoutes } from './portfolio.routes.js';
 import { ordersRoutes } from './orders.routes.js';
@@ -15,6 +16,7 @@ export const apiRoutes = Router();
 
 apiRoutes.use('/health', healthRoutes);
 apiRoutes.use('/stocks', stocksRoutes);
+apiRoutes.use('/options', optionsRoutes);
 apiRoutes.use('/dashboard', dashboardRoutes);
 apiRoutes.use('/portfolio', portfolioRoutes);
 apiRoutes.use('/orders', ordersRoutes);

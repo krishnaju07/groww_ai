@@ -6,10 +6,13 @@ import { useAISignalsStore } from '../store/useAISignalsStore.js';
 import { stocksService } from '../services/stocks.service.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { StockSelector } from '../components/trading/StockSelector.jsx';
+import { OptionsSelector } from '../components/trading/OptionsSelector.jsx';
 import { LivePriceChart } from '../components/dashboard/LivePriceChart.jsx';
 import { SignalCard } from '../components/trading/SignalCard.jsx';
 import { TradePanel } from '../components/trading/TradePanel.jsx';
 import { PositionsTable } from '../components/trading/PositionsTable.jsx';
+
+const MODES = ['EQUITY', 'OPTIONS'];
 
 export function Trade() {
   const watchlist = useStocksStore((s) => s.watchlist);
@@ -17,11 +20,14 @@ export function Trade() {
   const portfolio = usePortfolioStore((s) => s.portfolio);
   const fetchPortfolio = usePortfolioStore((s) => s.fetch);
   const askAI = useAIStore((s) => s.askAI);
+  const askAIOptions = useAIStore((s) => s.askAIOptions);
   const deciding = useAIStore((s) => s.deciding);
   const signals = useAISignalsStore((s) => s.signals);
   const fetchSignals = useAISignalsStore((s) => s.fetch);
 
+  const [mode, setMode] = useState('EQUITY');
   const [symbol, setSymbol] = useState('RELIANCE');
+  const [optionContract, setOptionContract] = useState(null);
   const [candles, setCandles] = useState([]);
   const [decision, setDecision] = useState(null);
 
@@ -29,36 +35,97 @@ export function Trade() {
   usePolling(fetchPortfolio, 5000);
   usePolling(fetchSignals, 30000);
 
-  useEffect(() => {
-    stocksService.candles(symbol, '5m', 100).then(setCandles);
-    setDecision(null);
-    const id = setInterval(() => stocksService.candles(symbol, '5m', 100).then(setCandles), 15000);
-    return () => clearInterval(id);
-  }, [symbol]);
+  const isOptions = mode === 'OPTIONS';
+  const activeSymbol = isOptions ? optionContract?.tradingSymbol : symbol;
 
-  const ltp = watchlist.find((s) => s.symbol === symbol)?.ltp;
+  useEffect(() => {
+    if (!activeSymbol) return;
+    setDecision(null);
+    if (isOptions) {
+      // No historical-candle route exists yet for option contracts — the chart shows the
+      // underlying's own price action, which is what actually drives the AI's directional read.
+      stocksService.candles(optionContract.underlying === 'NIFTY' ? 'NIFTY 50' : optionContract.underlying, '5m', 100).then(setCandles);
+      return;
+    }
+    stocksService.candles(activeSymbol, '5m', 100).then(setCandles);
+    const id = setInterval(() => stocksService.candles(activeSymbol, '5m', 100).then(setCandles), 15000);
+    return () => clearInterval(id);
+  }, [activeSymbol, isOptions, optionContract]);
+
+  const ltp = isOptions ? optionContract?.premium : watchlist.find((s) => s.symbol === symbol)?.ltp;
 
   async function handleAskAI() {
-    const d = await askAI(symbol);
+    // Options decisions run on the underlying (e.g. NIFTY) — decideOptions() itself picks
+    // CE vs PE and resolves the concrete contract, which may differ from whichever strike
+    // the user currently has clicked in the chain picker. Sync the selection to match so
+    // TradePanel's symbol/segment/lotSize/quantity stay consistent with what was actually decided.
+    if (isOptions) {
+      const d = await askAIOptions(optionContract.underlying, activeSymbol);
+      setDecision(d);
+      if (d.action === 'BUY' && d.tradingSymbol) {
+        const side = d.optionType === 'CE' ? d.indicatorsSnapshot?.ce : d.indicatorsSnapshot?.pe;
+        setOptionContract({
+          underlying: d.underlying,
+          strike: d.strike,
+          expiry: d.expiry,
+          optionType: d.optionType,
+          tradingSymbol: d.tradingSymbol,
+          lotSize: d.lotSize,
+          premium: side?.premium ?? optionContract.premium,
+        });
+      }
+      return;
+    }
+    const d = await askAI(activeSymbol);
     setDecision(d);
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold">Trade</h1>
-        <p className="text-sm text-muted">Analyze, ask Claude for a read, and place a paper order.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl font-bold">Trade</h1>
+          <p className="text-sm text-muted">Analyze, ask Claude for a read, and place a paper order.</p>
+        </div>
+        <div className="flex gap-1 rounded-xl border border-border/70 bg-surface/50 p-1">
+          {MODES.map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                mode === m ? 'bg-accent/10 text-accent' : 'text-muted hover:text-text'
+              }`}
+            >
+              {m === 'EQUITY' ? 'Equity' : 'Options'}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <StockSelector stocks={watchlist} selected={symbol} onSelect={setSymbol} signals={signals} />
+      {isOptions ? (
+        <OptionsSelector selected={optionContract} onSelectContract={setOptionContract} />
+      ) : (
+        <StockSelector stocks={watchlist} selected={symbol} onSelect={setSymbol} signals={signals} />
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <LivePriceChart symbol={symbol} candles={candles} />
-          <SignalCard symbol={symbol} decision={decision} loading={!!deciding[symbol]} onAskAI={handleAskAI} />
+          <LivePriceChart symbol={activeSymbol ?? '—'} candles={candles} />
+          {activeSymbol && (
+            <SignalCard symbol={activeSymbol} decision={decision} loading={!!deciding[activeSymbol]} onAskAI={handleAskAI} />
+          )}
         </div>
         <div>
-          <TradePanel symbol={symbol} ltp={ltp} decision={decision} onOrderPlaced={fetchPortfolio} />
+          {(!isOptions || optionContract) && (
+            <TradePanel
+              symbol={activeSymbol}
+              ltp={ltp}
+              decision={decision}
+              onOrderPlaced={fetchPortfolio}
+              segment={isOptions ? 'FNO' : 'CASH'}
+              lotSize={isOptions ? optionContract?.lotSize : null}
+            />
+          )}
         </div>
       </div>
 

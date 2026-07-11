@@ -34,6 +34,7 @@ export async function runSquareOffTick(userId = DEFAULT_USER_ID) {
         quantity: p.quantity,
         source: 'automatic',
         triggerReason: 'Intraday auto square-off — market closing, no overnight positions held',
+        segment: p.segment ?? 'CASH',
       });
       results.push({ symbol: p.symbol, status: order.status });
     } catch (err) {

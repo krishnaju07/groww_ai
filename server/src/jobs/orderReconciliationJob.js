@@ -35,7 +35,7 @@ export async function runOrderReconciliationTick() {
   for (const order of candidates) {
     try {
       const broker = brokerFor(order.broker, order.userId);
-      const detail = await broker.getOrderStatus(order.brokerOrderId);
+      const detail = await broker.getOrderStatus(order.brokerOrderId, order.segment ?? 'CASH');
 
       if (detail.status === order.status) continue; // still unresolved, try again next tick
 
@@ -43,7 +43,18 @@ export async function runOrderReconciliationTick() {
         const tradeId = await recordLiveFill(
           order.userId,
           order.broker,
-          { symbol: order.symbol, action: order.action, quantity: order.quantity, source: order.source },
+          {
+            symbol: order.symbol,
+            action: order.action,
+            quantity: order.quantity,
+            source: order.source,
+            segment: order.segment ?? 'CASH',
+            underlying: order.underlying,
+            strike: order.strike,
+            expiry: order.expiry,
+            optionType: order.optionType,
+            lotSize: order.lotSize,
+          },
           detail,
         );
         order.status = 'FILLED';
