@@ -46,14 +46,28 @@ optionsRoutes.get(
 
     // Chain structure (strike/CE-PE/lotSize) is static instrument data; premiums are
     // fetched live and merged in here so the frontend gets one call for the full picker.
+    // A failure here (e.g. no Groww live-data entitlement) is real and worth surfacing —
+    // `premiumsUnavailable` lets the UI show "unavailable" instead of a misleading ₹0.00
+    // (which, in a live real-money app, could easily be misread as "this option is free").
     const symbols = chain.flatMap((row) => [row.ce?.tradingSymbol, row.pe?.tradingSymbol].filter(Boolean));
-    const premiums = symbols.length ? await marketData.getLTPBatch(symbols, 'FNO').catch(() => ({})) : {};
+    let premiums = {};
+    let premiumsUnavailable = false;
+    let premiumsUnavailableReason = null;
+    if (symbols.length) {
+      try {
+        premiums = await marketData.getLTPBatch(symbols, 'FNO');
+      } catch (err) {
+        premiumsUnavailable = true;
+        premiumsUnavailableReason = err.message;
+        console.error(`[options.routes] premium fetch failed for ${underlying} chain:`, err.message);
+      }
+    }
     const enrichedChain = chain.map((row) => ({
       strike: row.strike,
       ce: row.ce ? { ...row.ce, premium: premiums[row.ce.tradingSymbol] ?? null } : null,
       pe: row.pe ? { ...row.pe, premium: premiums[row.pe.tradingSymbol] ?? null } : null,
     }));
 
-    res.json({ success: true, data: { chain: enrichedChain, spotPrice } });
+    res.json({ success: true, data: { chain: enrichedChain, spotPrice, premiumsUnavailable, premiumsUnavailableReason } });
   }),
 );

@@ -24,6 +24,8 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
   const [chain, setChain] = useState([]);
   const [spotPrice, setSpotPrice] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [premiumsUnavailable, setPremiumsUnavailable] = useState(false);
+  const [premiumsUnavailableReason, setPremiumsUnavailableReason] = useState(null);
 
   useEffect(() => {
     optionsService.underlyings().then((list) => {
@@ -45,9 +47,11 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
     setLoading(true);
     optionsService
       .chain(underlying, expiry)
-      .then(({ chain: c, spotPrice: sp }) => {
+      .then(({ chain: c, spotPrice: sp, premiumsUnavailable: pu, premiumsUnavailableReason: pur }) => {
         setChain(c);
         setSpotPrice(sp);
+        setPremiumsUnavailable(Boolean(pu));
+        setPremiumsUnavailableReason(pur ?? null);
       })
       .finally(() => setLoading(false));
   }, [underlying, expiry]);
@@ -121,6 +125,14 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
 
       {loading && <div className="py-4 text-center text-sm text-muted">Loading option chain…</div>}
 
+      {!loading && premiumsUnavailable && (
+        <div className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-xs text-warn">
+          Live premiums aren't available right now{premiumsUnavailableReason ? ` (${premiumsUnavailableReason})` : ''} — strike/expiry
+          data below is still real, but prices show as "—" rather than a possibly-wrong number. This usually means the
+          configured broker doesn't have F&amp;O live-data access.
+        </div>
+      )}
+
       {!loading && chain.length > 0 && (
         <div className="max-h-72 overflow-y-auto rounded-xl border border-border/60">
           <table className="w-full text-sm">
@@ -146,7 +158,7 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
                             : 'border-border/60 hover:border-accent/30'
                         }`}
                       >
-                        {row.ce ? formatINR(row.ce.premium ?? 0) : '—'}
+                        {row.ce?.premium != null ? formatINR(row.ce.premium) : '—'}
                       </button>
                     </td>
                     <td className="p-2 text-center font-semibold">{row.strike}{isAtm && <span className="ml-1 text-xs text-accent">ATM</span>}</td>
@@ -160,7 +172,7 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
                             : 'border-border/60 hover:border-accent/30'
                         }`}
                       >
-                        {row.pe ? formatINR(row.pe.premium ?? 0) : '—'}
+                        {row.pe?.premium != null ? formatINR(row.pe.premium) : '—'}
                       </button>
                     </td>
                   </tr>

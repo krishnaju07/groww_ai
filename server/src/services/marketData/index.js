@@ -14,8 +14,19 @@ const PROVIDERS = {
  * Live-editable via Settings (systemConfig.marketDataProvider) — no restart needed.
  * While the user has Live mode selected, mock is never a valid primary — real money
  * decisions must never run on a deliberately-configured fake feed either.
+ *
+ * FNO always resolves to Groww regardless of the configured marketDataProvider — Yahoo
+ * (the free default) has no concept of NSE option contracts at all. Worse than just
+ * "no data": YahooFinanceProvider.getLTPBatch catches per-symbol failures internally and
+ * returns an empty-but-successful result rather than throwing, so routing FNO through it
+ * doesn't even trigger withFallback's error handling/live-mode-refusal — it just silently
+ * yields no premiums with zero diagnostic trail. Groww is the only provider that can
+ * legitimately serve this data (and does throw properly on failure, e.g. missing
+ * credentials or no live-data entitlement), so FNO must go straight to it.
+ * @param {'CASH'|'FNO'} [segment]
  */
-async function getPrimary() {
+async function getPrimary(segment = 'CASH') {
+  if (segment === 'FNO') return GrowwProvider;
   const { marketDataProvider } = await getSystemConfig();
   const configured = PROVIDERS[marketDataProvider] ?? YahooFinanceProvider;
   if (configured === MockProvider && (await getSelectedTradingMode()) === 'live') {
@@ -93,7 +104,7 @@ export const marketData = {
     const key = `${segment}:${symbol}`;
     const cached = ltpCache.get(key);
     if (cached && Date.now() - cached.at < LTP_TTL_MS) return cached.value;
-    const primary = await getPrimary();
+    const primary = await getPrimary(segment);
     const value = await withFallback(
       primary,
       () => primary.getLTP(symbol, segment),
@@ -111,7 +122,7 @@ export const marketData = {
       return !c || Date.now() - c.at >= LTP_TTL_MS;
     });
     if (uncached.length) {
-      const primary = await getPrimary();
+      const primary = await getPrimary(segment);
       const fresh = await withFallback(
         primary,
         () => primary.getLTPBatch(uncached, segment),
@@ -136,7 +147,7 @@ export const marketData = {
     const key = `${segment}:${symbol}:${interval}:${limit}`;
     const cached = candleCache.get(key);
     if (cached && Date.now() - cached.at < CANDLE_TTL_MS) return cached.value;
-    const primary = await getPrimary();
+    const primary = await getPrimary(segment);
     const value = await withFallback(
       primary,
       () => primary.getCandles(symbol, interval, limit, segment),
