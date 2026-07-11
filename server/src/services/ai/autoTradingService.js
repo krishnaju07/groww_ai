@@ -17,6 +17,13 @@ import { buildContext, buildOptionsContext } from './contextBuilder.js';
 import { scoreQuant, scoreQuantOptions } from './aiSignalService.js';
 import { callProvider, callProviderOptions, resolveOptionContract } from './decisionEngine.js';
 import { runConsensus } from './consensusService.js';
+import { getLearnedEdge } from './learnedEdgeService.js';
+
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+/** @param {Date} [d] @returns {number} IST hour-of-day for learned-edge bucketing */
+function currentIstHour(d = new Date()) {
+  return new Date(d.getTime() + IST_OFFSET_MS).getUTCHours();
+}
 import { placeOrder } from '../orderService.js';
 import { effectiveMode } from '../brokers/tradingModeService.js';
 import { isMarketOpen, getAutoTradeWindowStatus, istDateKey } from '../../utils/marketHours.js';
@@ -215,13 +222,20 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   // Fresh entries require a tradeable broad-market regime when the filter is enabled.
   // Folded into windowStatus so both the equity per-BUY check and the options up-front
   // check enforce it with one code path. Exits are unaffected (they don't read this).
-  if (settings.systemConfig?.regimeFilterEnabled) {
-    const regime = await getMarketRegime();
-    if (!regime.tradeable) {
-      windowStatus.allowed = false;
-      windowStatus.reason = `Regime gate: ${regime.reason}`;
-    }
+  // Fetched unconditionally (30s-cached, cheap) so the learned-edge gate can bucket by
+  // the regime in effect regardless of whether the filter itself is on.
+  const tickRegime = await getMarketRegime();
+  if (settings.systemConfig?.regimeFilterEnabled && !tickRegime.tradeable) {
+    windowStatus.allowed = false;
+    windowStatus.reason = `Regime gate: ${tickRegime.reason}`;
   }
+
+  // Learned-edge gate config, resolved once per tick.
+  const learningGate = {
+    enabled: settings.systemConfig?.learningGateEnabled ?? true,
+    minSample: settings.systemConfig?.learningMinSample ?? 5,
+  };
+  const tickHour = currentIstHour();
 
   const equityContexts = await mapWithConcurrency(settings.watchlist.equities, CONTEXT_PREFETCH_CONCURRENCY, async (symbol) => {
     try {
@@ -272,6 +286,15 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       if (quantDecision.confidence < minConfidence) {
         results.push({ symbol, action: quantDecision.action, status: 'SKIPPED_LOW_CONFIDENCE', confidence: quantDecision.confidence });
         continue;
+      }
+      // Learned-edge gate — don't re-take a fresh entry the AI's own history proves it
+      // loses on (this regime / this hour). BUY-only; an exit is never blocked.
+      if (quantDecision.action === 'BUY' && learningGate.enabled) {
+        const edge = await getLearnedEdge(userId, { regime: tickRegime.regime, hour: tickHour }, { minSample: learningGate.minSample });
+        if (edge.verdict === 'VETO') {
+          results.push({ symbol, action: 'BUY', status: 'SKIPPED_NEGATIVE_EDGE', reason: edge.reason });
+          continue;
+        }
       }
       if (quantDecision.action === 'BUY' && openSymbols.has(symbol)) continue;
       if (quantDecision.action === 'BUY' && openPositionCount >= settings.autoInvest.maxOpenPositions) continue;
@@ -420,6 +443,15 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       if ((quantDecision.opportunityScore ?? 0) < oppThreshold) {
         results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_LOW_OPPORTUNITY', opportunityScore: quantDecision.opportunityScore });
         continue;
+      }
+      // Learned-edge gate — options entries are always fresh; veto proven-losing conditions
+      // (this regime / this side / this hour) before spending an LLM call on them.
+      if (learningGate.enabled) {
+        const edge = await getLearnedEdge(userId, { regime: tickRegime.regime, optionType: quantDecision.optionType, hour: tickHour }, { minSample: learningGate.minSample });
+        if (edge.verdict === 'VETO') {
+          results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_NEGATIVE_EDGE', reason: edge.reason });
+          continue;
+        }
       }
 
       let log;

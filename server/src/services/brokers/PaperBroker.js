@@ -12,6 +12,7 @@ import { marketData } from '../marketData/index.js';
 import { round2 } from '../../utils/format.js';
 import { applyBuyToPosition, applySellToPosition } from '../../utils/positionLedger.js';
 import { PAPER_SLIPPAGE } from '../../config/constants.js';
+import { critiqueClosedTrade } from '../ai/tradeCritiqueService.js';
 
 function fillPrice(ltp, action) {
   const slip = action === 'BUY' ? 1 + PAPER_SLIPPAGE : 1 - PAPER_SLIPPAGE;
@@ -120,6 +121,9 @@ export function createPaperBroker(userId) {
         aiDecisionId: o.aiDecisionId ?? null,
         closedAt: new Date(),
       });
+
+      // Self-critique + learned-edge cache refresh (non-blocking, never fails the fill).
+      critiqueClosedTrade(trade).catch(() => {});
 
       return { brokerOrderId: String(trade._id), status: 'FILLED', filledPrice: price, filledQuantity: o.quantity };
     },

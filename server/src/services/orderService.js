@@ -15,6 +15,7 @@ import { effectiveMode, assertLiveAllowed } from './brokers/tradingModeService.j
 import { brokerFor } from './brokers/registry.js';
 import { getSystemConfig } from './config/systemConfig.js';
 import { getInstrument } from './instruments/instrumentService.js';
+import { critiqueClosedTrade } from './ai/tradeCritiqueService.js';
 import { generateIdempotencyKey } from '../utils/idempotency.js';
 import { applyBuyToPosition, applySellToPosition } from '../utils/positionLedger.js';
 import { getIntradaySessionContext } from '../utils/marketHours.js';
@@ -125,6 +126,8 @@ export async function recordLiveFill(userId, brokerName, input, result) {
     closedAt: new Date(),
     ...optionFields,
   });
+  // Self-critique + learned-edge cache refresh (non-blocking, never fails the fill).
+  critiqueClosedTrade(trade).catch(() => {});
   return trade._id;
 }
 

@@ -74,6 +74,8 @@ const SettingsPatchSchema = z.object({
       opportunityScoreThreshold: z.coerce.number().min(0).max(100).optional(),
       consensusEnabled: z.boolean().optional(),
       consensusMinAgree: z.coerce.number().int().min(1).optional(),
+      learningGateEnabled: z.boolean().optional(),
+      learningMinSample: z.coerce.number().int().min(2).optional(),
       // Not persisted — only checked when enabling enableLiveAutoTrading, then discarded.
       confirmPhrase: z.string().optional(),
     })

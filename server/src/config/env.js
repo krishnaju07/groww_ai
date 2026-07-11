@@ -76,6 +76,13 @@ const Schema = z.object({
   // conviction. Off by default (opt into the extra API spend deliberately).
   CONSENSUS_ENABLED: boolStr(false),
   CONSENSUS_MIN_AGREE: z.coerce.number().int().min(1).default(2),
+
+  // Learned-edge / expected-value gate (learnedEdgeService.js) — vetoes fresh entries on
+  // setups the AI's own history proves it loses on (regime/side/hour). On by default: it
+  // only ever activates once a real losing track record exists on ≥ LEARNING_MIN_SAMPLE
+  // trades, so it's inert (safe) on a fresh account and grows teeth as history accrues.
+  LEARNING_GATE_ENABLED: boolStr(true),
+  LEARNING_MIN_SAMPLE: z.coerce.number().int().min(2).default(5),
 });
 
 const parsed = Schema.safeParse(process.env);

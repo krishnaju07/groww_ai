@@ -418,6 +418,40 @@ export function Settings() {
       </Card>
 
       <Card>
+        <div className="mb-4 font-display font-semibold">Learning Gate</div>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-bg/30 p-3">
+          <div>
+            <div className="text-sm font-medium">Veto setups the AI has proven it loses on</div>
+            <p className="text-xs text-muted">
+              Before a fresh entry, checks the AI's own closed-trade history for this market regime / option side / hour.
+              If a condition has a losing record over enough trades, the trade is skipped. Inert on a fresh account —
+              it only activates once real losing patterns exist.
+            </p>
+          </div>
+          <button
+            onClick={() => updateSystemConfig({ learningGateEnabled: !form.systemConfig?.learningGateEnabled }, `Learning gate turned ${!form.systemConfig?.learningGateEnabled ? 'on' : 'off'}`)}
+            className={`shrink-0 rounded-xl border px-4 py-2 text-xs font-semibold transition-colors ${
+              form.systemConfig?.learningGateEnabled ?? true ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border/70 text-muted hover:border-border'
+            }`}
+          >
+            {form.systemConfig?.learningGateEnabled ?? true ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        <div className="mt-3">
+          <label className="mb-1 block text-xs font-medium text-muted">Min trades before a condition can veto</label>
+          <input
+            type="number"
+            min={2}
+            className={INPUT}
+            value={form.systemConfig?.learningMinSample ?? 5}
+            onChange={(e) => setForm((f) => ({ ...f, systemConfig: { ...f.systemConfig, learningMinSample: Math.max(2, parseInt(e.target.value, 10) || 2) } }))}
+            onBlur={() => updateSystemConfig({ learningMinSample: form.systemConfig.learningMinSample }, `Learning min-sample set to ${form.systemConfig.learningMinSample}`)}
+          />
+          <p className="mt-1 text-xs text-muted">Higher = more evidence required before the AI avoids a condition (fewer false vetoes).</p>
+        </div>
+      </Card>
+
+      <Card>
         <div className="mb-4 font-display font-semibold">Auto-Exit / Position Management</div>
         <p className="mb-3 text-xs text-muted">
           How open positions are protected and booked automatically (checked every 15s). These apply to every open

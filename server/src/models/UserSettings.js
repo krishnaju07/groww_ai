@@ -91,6 +91,9 @@ const UserSettingsSchema = new mongoose.Schema(
       // AI Consensus Engine (consensusService.js): poll all configured LLMs and require N to agree.
       consensusEnabled: { type: Boolean, default: env.CONSENSUS_ENABLED },
       consensusMinAgree: { type: Number, default: env.CONSENSUS_MIN_AGREE },
+      // Learned-edge / expected-value gate (learnedEdgeService.js): veto proven-losing setups.
+      learningGateEnabled: { type: Boolean, default: env.LEARNING_GATE_ENABLED },
+      learningMinSample: { type: Number, default: env.LEARNING_MIN_SAMPLE },
     },
   },
   { timestamps: true },

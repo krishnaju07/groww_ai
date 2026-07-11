@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
 import { getPeriodReport, getLearningInsights } from '../services/analyticsService.js';
+import { TradeCritique } from '../models/TradeCritique.js';
 
 export const reportsRoutes = Router();
 
@@ -23,6 +24,15 @@ reportsRoutes.get(
   '/learning',
   asyncHandler(async (req, res) => {
     const data = await getLearningInsights(req.userId);
+    res.json({ success: true, data });
+  }),
+);
+
+/** The AI's self-critiques of its own recent closed trades (most recent first). */
+reportsRoutes.get(
+  '/critiques',
+  asyncHandler(async (req, res) => {
+    const data = await TradeCritique.find({ userId: req.userId }).sort({ createdAt: -1 }).limit(30).lean();
     res.json({ success: true, data });
   }),
 );
