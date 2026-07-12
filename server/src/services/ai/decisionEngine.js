@@ -49,6 +49,12 @@ const perplexityClient = env.PERPLEXITY_API_KEY ? new OpenAI({ apiKey: env.PERPL
 const SCORE_KEYS = ['trendConfluence', 'momentum', 'volumeConviction', 'newsSentiment', 'trackRecord'];
 
 let logSeq = 0;
+// The equity/options system prompts are static text (no per-call variation) — printing
+// the full block on every single tick's LLM call would flood the terminal over a trading
+// day for no new information. Print it in full only the first time this exact text is
+// seen; every later call with the SAME text gets a one-line pointer back to that log id.
+const seenSystemPrompts = new Map(); // systemPrompt string -> the [AI #id] it was first printed under
+
 /**
  * Debug visibility into the actual LLM traffic (env.AI_DEBUG_LOG, on by default) — prints
  * the exact model/system-prompt/user-content sent and the raw JSON received, so it's clear
@@ -60,7 +66,13 @@ function logAiRequest(label, model, systemPrompt, userContent) {
   if (!env.AI_DEBUG_LOG) return null;
   const id = ++logSeq;
   console.log(`\n[AI #${id}] --> ${label} (${model}) REQUEST @ ${new Date().toISOString()}`);
-  console.log(`[AI #${id}] system:\n${systemPrompt}`);
+  const firstSeenId = seenSystemPrompts.get(systemPrompt);
+  if (firstSeenId == null) {
+    seenSystemPrompts.set(systemPrompt, id);
+    console.log(`[AI #${id}] system:\n${systemPrompt}`);
+  } else {
+    console.log(`[AI #${id}] system: unchanged since [AI #${firstSeenId}] (${systemPrompt.length} chars)`);
+  }
   console.log(`[AI #${id}] user:\n${userContent}`);
   return { id, startedAt: Date.now() };
 }

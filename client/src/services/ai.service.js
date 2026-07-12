@@ -7,4 +7,5 @@ export const aiService = {
   signals: () => api.get('/ai/signals').then((r) => r.data),
   stats: () => api.get('/ai/stats').then((r) => r.data),
   regime: () => api.get('/ai/regime').then((r) => r.data),
+  activity: (limit = 50) => api.get('/ai/activity', { params: { limit } }).then((r) => r.data),
 };

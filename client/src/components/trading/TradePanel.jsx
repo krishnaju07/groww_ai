@@ -43,6 +43,16 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced, segment = 'CA
 
   const estimatedValue = (ltp || 0) * quantity;
 
+  // Quick-pick quantity presets — lots for options (1/2/5/10 lots), ₹ tiers for equity
+  // (converted to share count via LTP, rounded down so a preset never overshoots).
+  const qtyPresets = isOptions && lotSize
+    ? [1, 2, 5, 10].map((lots) => ({ label: `${lots} lot${lots > 1 ? 's' : ''}`, quantity: lots * lotSize }))
+    : ltp > 0
+      ? [500, 1000, 2000, 5000]
+          .map((inr) => ({ label: `₹${inr}`, quantity: Math.max(1, Math.floor(inr / ltp)) }))
+          .filter((p, i, arr) => i === 0 || p.quantity !== arr[i - 1].quantity) // dedupe when LTP is high enough that tiers collapse to the same share count
+      : [];
+
   function handleSubmitClick() {
     if (isLive) {
       setShowConfirm(true);
@@ -112,6 +122,22 @@ export function TradePanel({ symbol, ltp, decision, onOrderPlaced, segment = 'CA
           />
           {isOptions && lotSize && quantity % lotSize !== 0 && (
             <div className="mt-1 text-xs text-danger">Must be a multiple of the lot size ({lotSize}).</div>
+          )}
+          {qtyPresets.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {qtyPresets.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => setQuantity(p.quantity)}
+                  className={`rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                    quantity === p.quantity ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border/60 text-muted hover:border-border'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
         <div className="grid grid-cols-2 gap-3">

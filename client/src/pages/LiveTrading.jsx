@@ -7,6 +7,7 @@ import { Card } from '../components/common/Card.jsx';
 import { INRInput } from '../components/common/INRInput.jsx';
 import { LiveAutoTradingConfirmModal } from '../components/common/LiveAutoTradingConfirmModal.jsx';
 import { TradingModeToggle } from '../components/brokers/TradingModeToggle.jsx';
+import { AutoTradeActivityFeed } from '../components/trading/AutoTradeActivityFeed.jsx';
 import { toast } from '../store/useToastStore.js';
 
 /**
@@ -166,6 +167,15 @@ export function LiveTrading() {
         {showLiveAutoConfirm && (
           <LiveAutoTradingConfirmModal onConfirm={confirmLiveAutoTrading} onCancel={() => setShowLiveAutoConfirm(false)} />
         )}
+      </Card>
+
+      <Card>
+        <div className="mb-1 font-display font-semibold">Auto-Trading Activity</div>
+        <p className="mb-3 text-xs text-muted">
+          What the 30s auto-trading tick is actually doing right now — every skip, veto, and order attempt, not just the
+          ones that fired. Hover a status for the full reason.
+        </p>
+        <AutoTradeActivityFeed />
       </Card>
 
       <Card>

@@ -3,7 +3,6 @@ import { useStocksStore } from '../store/useStocksStore.js';
 import { usePortfolioStore } from '../store/usePortfolioStore.js';
 import { useAIStore } from '../store/useAIStore.js';
 import { useAISignalsStore } from '../store/useAISignalsStore.js';
-import { stocksService } from '../services/stocks.service.js';
 import { watchlistService } from '../services/watchlist.service.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { StockSelector } from '../components/trading/StockSelector.jsx';
@@ -30,7 +29,6 @@ export function Trade() {
   const [mode, setMode] = useState('EQUITY');
   const [symbol, setSymbol] = useState('RELIANCE');
   const [optionContract, setOptionContract] = useState(null);
-  const [candles, setCandles] = useState([]);
   const [decision, setDecision] = useState(null);
   const [focusOptionUnderlyings, setFocusOptionUnderlyings] = useState([]);
 
@@ -62,21 +60,16 @@ export function Trade() {
 
   const isOptions = mode === 'OPTIONS';
   const activeSymbol = isOptions ? optionContract?.tradingSymbol : symbol;
+  // The chart is always of the UNDERLYING's own price action (that's what actually drives
+  // the AI's directional read) — for options this differs from activeSymbol (the concrete
+  // contract), which is why LivePriceChart takes a separate chartSymbol + displayLabel.
+  const chartSymbol = isOptions ? optionContract?.spotSymbol ?? optionContract?.underlying : symbol;
+  const markerFilter = isOptions ? { underlying: optionContract?.underlying } : { symbol };
 
   useEffect(() => {
     if (!activeSymbol) return;
     setDecision(null);
-    if (isOptions) {
-      // No historical-candle route exists yet for option contracts — the chart shows the
-      // underlying's own price action, which is what actually drives the AI's directional read.
-      const spotSymbol = optionContract.spotSymbol ?? optionContract.underlying;
-      stocksService.candles(spotSymbol, '5m', 100).then(setCandles);
-      return;
-    }
-    stocksService.candles(activeSymbol, '5m', 100).then(setCandles);
-    const id = setInterval(() => stocksService.candles(activeSymbol, '5m', 100).then(setCandles), 15000);
-    return () => clearInterval(id);
-  }, [activeSymbol, isOptions, optionContract]);
+  }, [activeSymbol]);
 
   const ltp = isOptions ? optionContract?.premium : watchlist.find((s) => s.symbol === symbol)?.ltp;
 
@@ -152,7 +145,7 @@ export function Trade() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <LivePriceChart symbol={activeSymbol ?? '—'} candles={candles} />
+          <LivePriceChart symbol={chartSymbol} displayLabel={activeSymbol} markerFilter={markerFilter} />
           {activeSymbol && (
             <SignalCard symbol={activeSymbol} decision={decision} loading={!!deciding[activeSymbol]} onAskAI={handleAskAI} />
           )}

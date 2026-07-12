@@ -36,7 +36,7 @@ stocksRoutes.get(
 );
 
 const CandlesQuerySchema = z.object({
-  interval: z.enum(['1m', '5m', '15m', '1d']).optional(),
+  interval: z.enum(['1m', '5m', '15m', '30m', '1d']).optional(),
   limit: z.coerce.number().int().positive().max(500).optional(),
 });
 

@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
 import { OPTION_UNDERLYINGS } from '../config/constants.js';
-import { getExpiries, getOptionChain } from '../services/instruments/instrumentService.js';
+import { getExpiries, getOptionChain, getAtmStrike } from '../services/instruments/instrumentService.js';
 import { marketData } from '../services/marketData/index.js';
+import { getChainIntel, getContractGreeks } from '../services/ai/optionIntelService.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 
 export const optionsRoutes = Router();
 
@@ -62,12 +64,52 @@ optionsRoutes.get(
         console.error(`[options.routes] premium fetch failed for ${underlying} chain:`, err.message);
       }
     }
-    const enrichedChain = chain.map((row) => ({
+    let enrichedChain = chain.map((row) => ({
       strike: row.strike,
       ce: row.ce ? { ...row.ce, premium: premiums[row.ce.tradingSymbol] ?? null } : null,
       pe: row.pe ? { ...row.pe, premium: premiums[row.pe.tradingSymbol] ?? null } : null,
     }));
 
-    res.json({ success: true, data: { chain: enrichedChain, spotPrice, premiumsUnavailable, premiumsUnavailableReason } });
+    // Chain intelligence (PCR/Max Pain/OI) + per-contract greeks — same optionIntelService
+    // used by the AI's own decision context (contextBuilder.js), so the UI shows exactly
+    // what the AI reasons about. Both degrade to unavailable/null gracefully (no live F&O
+    // data feed yet), never throwing — this is a display enrichment, not required data.
+    let chainIntel = { available: false };
+    if (spotPrice != null) {
+      try {
+        const atmStrike = await getAtmStrike(underlying, expiryDate, spotPrice);
+        const result = await getChainIntel(underlying, expiryDate, spotPrice, atmStrike);
+        chainIntel = { available: result.available, ...result.intel };
+
+        if (result.available) {
+          const greeksByStrike = new Map(
+            await mapWithConcurrency(result.contracts, 6, async (row) => {
+              const [ceGreeks, peGreeks] = await Promise.all([
+                row.ce?.premium != null
+                  ? getContractGreeks({ underlying, tradingSymbol: row.ce.tradingSymbol, expiry: expiryDate, optionType: 'CE', spot: spotPrice, strike: row.strike, premium: row.ce.premium })
+                  : null,
+                row.pe?.premium != null
+                  ? getContractGreeks({ underlying, tradingSymbol: row.pe.tradingSymbol, expiry: expiryDate, optionType: 'PE', spot: spotPrice, strike: row.strike, premium: row.pe.premium })
+                  : null,
+              ]);
+              return [row.strike, { ceGreeks, peGreeks }];
+            }),
+          );
+          enrichedChain = enrichedChain.map((row) => {
+            const g = greeksByStrike.get(row.strike);
+            if (!g) return row;
+            return {
+              ...row,
+              ce: row.ce ? { ...row.ce, greeks: g.ceGreeks } : null,
+              pe: row.pe ? { ...row.pe, greeks: g.peGreeks } : null,
+            };
+          });
+        }
+      } catch (err) {
+        console.error(`[options.routes] chain intel failed for ${underlying}:`, err.message);
+      }
+    }
+
+    res.json({ success: true, data: { chain: enrichedChain, spotPrice, premiumsUnavailable, premiumsUnavailableReason, chainIntel } });
   }),
 );

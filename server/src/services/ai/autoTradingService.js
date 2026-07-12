@@ -18,6 +18,7 @@ import { scoreQuant, scoreQuantOptions } from './aiSignalService.js';
 import { callProvider, callProviderOptions, resolveOptionContract } from './decisionEngine.js';
 import { runConsensus } from './consensusService.js';
 import { getLearnedEdge } from './learnedEdgeService.js';
+import { AutoTradeActivity } from '../../models/AutoTradeActivity.js';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
 /** @param {Date} [d] @returns {number} IST hour-of-day for learned-edge bucketing */
@@ -40,6 +41,46 @@ const lastConfirmAttempt = new Map(); // symbol -> timestamp
 // the sequential decision/order-placement pass below (which must stay sequential: it
 // mutates openPositionCount/openSymbols across iterations to enforce maxOpenPositions).
 const CONTEXT_PREFETCH_CONCURRENCY = 5;
+
+// Last-persisted (symbol -> "action|status|reason") signature, so a symbol stuck in the
+// SAME state tick after tick (e.g. perpetually low-confidence, or a persistently broken
+// data feed) writes ONE row and then stays silent until something actually changes,
+// instead of one row every 30s forever. Process-lifetime only (resets on restart) — worst
+// case after a restart is one harmless repeat row, not unbounded growth.
+const lastActivitySignature = new Map(); // symbol -> signature string
+
+/**
+ * Persists this tick's decisions (fire-and-forget — a logging failure must never affect
+ * the tick's actual return value or block it) so they're visible via GET /ai/activity /
+ * the LiveTrading feed, not just the server console. `optionsStartIndex` marks where the
+ * options section's entries begin in `results` (equity and options share one array),
+ * since neither section tags its own pushes with a segment.
+ * @param {string} userId @param {object[]} results @param {number} optionsStartIndex
+ */
+function persistTickActivity(userId, results, optionsStartIndex) {
+  if (!results.length) return;
+  const tickAt = new Date();
+  const docs = results
+    .map((r, i) => ({
+      userId,
+      tickAt,
+      symbol: r.symbol,
+      segment: i >= optionsStartIndex ? 'FNO' : 'CASH',
+      action: r.action ?? null,
+      status: r.status,
+      reason: r.reason ?? '',
+      confidence: r.confidence ?? null,
+      opportunityScore: r.opportunityScore ?? null,
+    }))
+    .filter((d) => {
+      const signature = `${d.action}|${d.status}|${d.reason}`;
+      if (lastActivitySignature.get(d.symbol) === signature) return false;
+      lastActivitySignature.set(d.symbol, signature);
+      return true;
+    });
+  if (!docs.length) return;
+  AutoTradeActivity.insertMany(docs).catch((err) => console.error('[autoTradingService] activity persist failed:', err.message));
+}
 
 /**
  * @param {string} userId @param {string} symbol @param {string} providerKey
@@ -382,8 +423,10 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   // positionGuardianJob/squareOffJob watching the Position's stored stopLoss/target.
   // Since every options decision here is a fresh ENTRY, the time-of-day window gates the
   // whole section up front rather than per-underlying.
+  const optionsStartIndex = results.length;
   if (!windowStatus.allowed) {
     results.push({ symbol: 'OPTIONS', status: 'SKIPPED_TRADING_WINDOW', reason: windowStatus.reason });
+    persistTickActivity(userId, results, optionsStartIndex);
     return { ran: true, results };
   }
   const openUnderlyings = new Set(openPositions.filter((p) => p.segment === 'FNO').map((p) => p.underlying));
@@ -525,5 +568,6 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
     }
   }
 
+  persistTickActivity(userId, results, optionsStartIndex);
   return { ran: true, results };
 }

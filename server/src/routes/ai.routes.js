@@ -8,6 +8,7 @@ import { getMarketRegime } from '../services/ai/regimeService.js';
 import { OPTION_UNDERLYINGS } from '../config/constants.js';
 import { getEquityDetails } from '../services/instruments/instrumentService.js';
 import { round2 } from '../utils/format.js';
+import { AutoTradeActivity } from '../models/AutoTradeActivity.js';
 
 export const aiRoutes = Router();
 
@@ -51,6 +52,10 @@ aiRoutes.get(
     const limit = Number(req.query.limit) || 50;
     const filter = { userId: req.userId };
     if (req.query.symbol) filter.symbol = String(req.query.symbol).toUpperCase();
+    // Options: an option's own tradingSymbol changes every expiry rollover, so filtering
+    // by `underlying` (e.g. NIFTY) instead is what actually finds decision history for
+    // "the chart currently on screen" (used for chart decision markers).
+    if (req.query.underlying) filter.underlying = String(req.query.underlying).toUpperCase();
     if (req.query.action) filter.action = req.query.action;
     const data = await AIDecisionLog.find(filter).sort({ createdAt: -1 }).limit(limit).lean();
     res.json({ success: true, data });
@@ -90,5 +95,20 @@ aiRoutes.get(
         avgPnl: totalClosed ? round2(totalPnl / totalClosed) : 0,
       },
     });
+  }),
+);
+
+/**
+ * Recent auto-trading tick activity — every skip/veto/order attempt the 30s auto-trader
+ * has made, newest first. Previously this only ever hit the server console (autoTradingJob.js);
+ * this is what makes "why didn't it trade X" / "did the learned-edge gate fire" visible
+ * without watching the terminal at the exact moment it happens.
+ */
+aiRoutes.get(
+  '/activity',
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const data = await AutoTradeActivity.find({ userId: req.userId }).sort({ tickAt: -1 }).limit(limit).lean();
+    res.json({ success: true, data });
   }),
 );

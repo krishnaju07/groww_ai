@@ -26,6 +26,7 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
   const [loading, setLoading] = useState(false);
   const [premiumsUnavailable, setPremiumsUnavailable] = useState(false);
   const [premiumsUnavailableReason, setPremiumsUnavailableReason] = useState(null);
+  const [chainIntel, setChainIntel] = useState(null);
 
   useEffect(() => {
     optionsService.underlyings().then((list) => {
@@ -47,11 +48,12 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
     setLoading(true);
     optionsService
       .chain(underlying, expiry)
-      .then(({ chain: c, spotPrice: sp, premiumsUnavailable: pu, premiumsUnavailableReason: pur }) => {
+      .then(({ chain: c, spotPrice: sp, premiumsUnavailable: pu, premiumsUnavailableReason: pur, chainIntel: ci }) => {
         setChain(c);
         setSpotPrice(sp);
         setPremiumsUnavailable(Boolean(pu));
         setPremiumsUnavailableReason(pur ?? null);
+        setChainIntel(ci ?? null);
       })
       .finally(() => setLoading(false));
   }, [underlying, expiry]);
@@ -133,6 +135,22 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
         </div>
       )}
 
+      {!loading && !premiumsUnavailable && chain.length > 0 && (
+        <div className="rounded-xl border border-border/60 bg-bg/30 p-3 text-xs">
+          {chainIntel?.available ? (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+              <span>PCR <span className="font-semibold text-text">{chainIntel.pcr}</span></span>
+              <span>Max Pain <span className="font-semibold text-text">{chainIntel.maxPain}</span></span>
+              {chainIntel.supportStrike != null && <span>OI Support <span className="font-semibold text-accent">{chainIntel.supportStrike}</span></span>}
+              {chainIntel.resistanceStrike != null && <span>OI Resistance <span className="font-semibold text-danger">{chainIntel.resistanceStrike}</span></span>}
+              {chainIntel.biasNote && <span className="text-muted">{chainIntel.biasNote}</span>}
+            </div>
+          ) : (
+            <span className="text-muted">{chainIntel?.biasNote ?? 'Chain intelligence (PCR/Max Pain/OI) unavailable — needs a live F&O data feed.'}</span>
+          )}
+        </div>
+      )}
+
       {!loading && chain.length > 0 && (
         <div className="max-h-72 overflow-y-auto rounded-xl border border-border/60">
           <table className="w-full text-sm">
@@ -146,9 +164,13 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
             <tbody>
               {chain.map((row) => {
                 const isAtm = row.strike === atmStrike;
+                // ITM/OTM is relative to spot, independent of which side actually has liquidity —
+                // a call is ITM below spot, a put is ITM above spot.
+                const ceItm = spotPrice != null && row.strike < spotPrice;
+                const peItm = spotPrice != null && row.strike > spotPrice;
                 return (
                   <tr key={row.strike} className={`border-t border-border/40 ${isAtm ? 'bg-accent/5' : ''}`}>
-                    <td className="p-2">
+                    <td className={`p-2 ${ceItm ? 'bg-accent/[0.04]' : ''}`}>
                       <button
                         disabled={!row.ce}
                         onClick={() => pick(row, 'CE')}
@@ -158,11 +180,14 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
                             : 'border-border/60 hover:border-accent/30'
                         }`}
                       >
-                        {row.ce?.premium != null ? formatINR(row.ce.premium) : '—'}
+                        <div>{row.ce?.premium != null ? formatINR(row.ce.premium) : '—'}</div>
+                        {row.ce?.greeks && (
+                          <div className="text-[10px] text-muted">Δ {row.ce.greeks.delta} · θ {row.ce.greeks.theta}</div>
+                        )}
                       </button>
                     </td>
                     <td className="p-2 text-center font-semibold">{row.strike}{isAtm && <span className="ml-1 text-xs text-accent">ATM</span>}</td>
-                    <td className="p-2">
+                    <td className={`p-2 ${peItm ? 'bg-danger/[0.04]' : ''}`}>
                       <button
                         disabled={!row.pe}
                         onClick={() => pick(row, 'PE')}
@@ -172,7 +197,10 @@ export function OptionsSelector({ selected, onSelectContract, focusUnderlyings =
                             : 'border-border/60 hover:border-accent/30'
                         }`}
                       >
-                        {row.pe?.premium != null ? formatINR(row.pe.premium) : '—'}
+                        <div>{row.pe?.premium != null ? formatINR(row.pe.premium) : '—'}</div>
+                        {row.pe?.greeks && (
+                          <div className="text-[10px] text-muted">Δ {row.pe.greeks.delta} · θ {row.pe.greeks.theta}</div>
+                        )}
                       </button>
                     </td>
                   </tr>
