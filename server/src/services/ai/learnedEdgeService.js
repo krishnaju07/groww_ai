@@ -36,15 +36,21 @@ async function loadHistory(userId) {
     .select('pnl optionType openedAt aiDecisionId')
     .lean();
   const decIds = trades.map((t) => t.aiDecisionId).filter(Boolean);
-  const decisions = await AIDecisionLog.find({ _id: { $in: decIds } }).select('indicatorsSnapshot.regime.regime').lean();
-  const regimeById = new Map(decisions.map((d) => [String(d._id), d.indicatorsSnapshot?.regime?.regime ?? null]));
+  const decisions = await AIDecisionLog.find({ _id: { $in: decIds } }).select('indicatorsSnapshot.regime.regime strategy').lean();
+  const decisionById = new Map(decisions.map((d) => [String(d._id), d]));
 
-  const rows = trades.map((t) => ({
-    pnl: t.pnl || 0,
-    regime: regimeById.get(String(t.aiDecisionId)) ?? null,
-    optionType: t.optionType ?? null,
-    hour: istHour(t.openedAt),
-  }));
+  const rows = trades.map((t) => {
+    const d = decisionById.get(String(t.aiDecisionId));
+    return {
+      pnl: t.pnl || 0,
+      regime: d?.indicatorsSnapshot?.regime?.regime ?? null,
+      optionType: t.optionType ?? null,
+      // DIRECTIONAL is the pre-existing default for decisions logged before this field
+      // existed — treated as directional, which is what they all were.
+      strategy: d?.strategy ?? 'DIRECTIONAL',
+      hour: istHour(t.openedAt),
+    };
+  });
   cache.set(userId, { rows, fetchedAt: Date.now() });
   return rows;
 }
@@ -75,13 +81,19 @@ function stats(pnls) {
  * same conditions.
  *
  * @param {string} userId
- * @param {{regime?:string|null, optionType?:string|null, hour?:number|null}} setup
+ * @param {{regime?:string|null, optionType?:string|null, hour?:number|null, strategy?:string|null}} setup
  * @param {{minSample?:number}} [opts] minSample = trades a bucket needs before it may VETO
  * @returns {Promise<{verdict:'PROCEED'|'CAUTION'|'VETO', reason:string, worst:object|null, buckets:object[]}>}
  */
 export async function getLearnedEdge(userId, setup, opts = {}) {
   const minSample = opts.minSample ?? 5;
-  const rows = await loadHistory(userId);
+  let rows = await loadHistory(userId);
+
+  // A straddle's P&L pattern (one leg wins big, the other decays to near-zero) is
+  // fundamentally different from a directional CE/PE bet's — averaging them into the same
+  // regime/side/hour buckets would corrupt both track records. When the setup names a
+  // strategy, restrict history to that strategy FIRST, before building any dimension.
+  if (setup.strategy) rows = rows.filter((r) => r.strategy === setup.strategy);
 
   // Build a bucket per dimension we have a value for. Each bucket is only allowed to VETO
   // once it has minSample trades — below that it's informational, so the AI isn't paralysed

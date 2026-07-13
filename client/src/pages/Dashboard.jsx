@@ -11,6 +11,11 @@ import { AIDecisionFeed } from '../components/dashboard/AIDecisionFeed.jsx';
 import { AITopPicks } from '../components/dashboard/AITopPicks.jsx';
 import { RecentTradesTable } from '../components/dashboard/RecentTradesTable.jsx';
 import { RiskSummaryCard } from '../components/dashboard/RiskSummaryCard.jsx';
+import { TodayGlanceCard } from '../components/dashboard/TodayGlanceCard.jsx';
+import { LearningInsightTeaser } from '../components/dashboard/LearningInsightTeaser.jsx';
+import { RegimeBadge } from '../components/trading/RegimeBadge.jsx';
+import { AutoTradeActivityFeed } from '../components/trading/AutoTradeActivityFeed.jsx';
+import { Card } from '../components/common/Card.jsx';
 
 export function Dashboard() {
   const portfolio = usePortfolioStore((s) => s.portfolio);
@@ -36,12 +41,17 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm text-muted">Your AI-powered trading command center.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold">Dashboard</h1>
+          <p className="text-sm text-muted">Your AI-powered trading command center.</p>
+        </div>
+        <RegimeBadge />
       </div>
 
       <PortfolioSummaryBar portfolio={portfolio} />
+
+      <TodayGlanceCard />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <EquityCurve data={equityCurve} />
@@ -50,12 +60,21 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1 space-y-6">
           <RiskSummaryCard meter={meter} />
+          <LearningInsightTeaser />
           <AITopPicks signals={signals} />
         </div>
         <div className="lg:col-span-2">
           <AIDecisionFeed decisions={decisions} />
         </div>
       </div>
+
+      <Card>
+        <div className="mb-1 font-display font-semibold">Auto-Trading Activity</div>
+        <p className="mb-3 text-xs text-muted">
+          What the 30s auto-trading tick is doing right now — every skip, veto, and order attempt.
+        </p>
+        <AutoTradeActivityFeed />
+      </Card>
 
       <RecentTradesTable trades={trades} />
     </div>

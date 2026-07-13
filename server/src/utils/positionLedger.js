@@ -25,7 +25,7 @@ function toObjectIdOrNull(id) {
  * @param {{userId:string, broker:string, symbol:string, quantity:number, investmentAmount:number,
  *   price:number, stopLoss?:number|null, target?:number|null, aiDecisionId?:string|null,
  *   segment?:string, underlying?:string|null, strike?:number|null, expiry?:Date|null,
- *   optionType?:string|null, lotSize?:number|null}} input
+ *   optionType?:string|null, lotSize?:number|null, strategy?:string, strategyGroupId?:string|null}} input
  * @returns {Promise<import('mongoose').Document>} the updated/created Position document
  */
 export async function applyBuyToPosition({
@@ -44,6 +44,8 @@ export async function applyBuyToPosition({
   expiry,
   optionType,
   lotSize,
+  strategy,
+  strategyGroupId,
 }) {
   const pipeline = [
     {
@@ -63,6 +65,8 @@ export async function applyBuyToPosition({
         stopLoss: { $ifNull: ['$stopLoss', stopLoss ?? null] },
         target: { $ifNull: ['$target', target ?? null] },
         aiDecisionId: { $ifNull: ['$aiDecisionId', toObjectIdOrNull(aiDecisionId)] },
+        strategy: { $ifNull: ['$strategy', strategy ?? 'DIRECTIONAL'] },
+        strategyGroupId: { $ifNull: ['$strategyGroupId', strategyGroupId ?? null] },
         openedAt: { $ifNull: ['$openedAt', new Date()] },
       },
     },

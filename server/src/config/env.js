@@ -89,6 +89,18 @@ const Schema = z.object({
   // in the server terminal instead of only the final merged decision. Default ON since
   // this is a debugging aid with no cost/behavior impact; set to 'false' to quiet it down.
   AI_DEBUG_LOG: boolStr(true),
+
+  // Volatility-straddle strategy (optionStrategies.js) — buy both CE and PE when the
+  // market regime is HIGH_VOLATILITY (today, that regime is a pure sit-out otherwise).
+  // Off by default: it's a materially different risk shape (two simultaneous legs) from
+  // every other strategy on this platform, so it's opt-in rather than silently active.
+  VOLATILITY_STRADDLE_ENABLED: boolStr(false),
+
+  // Which market(s) the 30s auto-trading tick actually acts on — EQUITY only, OPTIONS
+  // only, or BOTH. Defaults to OPTIONS: this project's primary focus is Nifty 50 options
+  // trading, not the equity watchlist (which exists mainly to feed the AI Top Picks /
+  // manual Trade page, not to be auto-traded by default).
+  AUTO_TRADING_FOCUS: z.enum(['EQUITY', 'OPTIONS', 'BOTH']).default('OPTIONS'),
 });
 
 const parsed = Schema.safeParse(process.env);

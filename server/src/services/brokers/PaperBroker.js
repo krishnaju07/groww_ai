@@ -83,6 +83,8 @@ export function createPaperBroker(userId) {
           stopLoss: o.stopLoss,
           target: o.target,
           aiDecisionId: o.aiDecisionId,
+          strategy: o.strategy,
+          strategyGroupId: o.strategyGroupId,
           ...optionFields,
         });
 

@@ -73,6 +73,8 @@ export async function recordLiveFill(userId, brokerName, input, result) {
       stopLoss: input.stopLoss,
       target: input.target,
       aiDecisionId: input.aiDecisionId,
+      strategy: input.strategy,
+      strategyGroupId: input.strategyGroupId,
       ...optionFields,
     });
 
@@ -382,6 +384,8 @@ export async function placeOrder(userId, input) {
       source,
       triggerReason: input.triggerReason,
       aiDecisionId: input.aiDecisionId,
+      strategy: input.strategy,
+      strategyGroupId: input.strategyGroupId,
       ...optionFields,
     });
 

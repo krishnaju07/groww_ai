@@ -23,6 +23,15 @@ const AIDecisionLogSchema = new mongoose.Schema(
     // Options only — the 0-100 scanner score (opportunityScore.js) that ranked this setup
     // and gated whether it was worth an LLM call. Null for equity/legacy decisions.
     opportunityScore: { type: Number, default: null },
+    // Which options strategy produced this decision (optionStrategies.js). DIRECTIONAL is
+    // the default single-leg CE/PE trend-continuation read; VOLATILITY_STRADDLE is a
+    // regime-triggered dual-leg (CE+PE) bet on a big move in either direction. Learned-edge/
+    // self-critique bucket by this so a straddle's different P&L shape never gets averaged
+    // together with directional trades under the same regime.
+    strategy: { type: String, enum: ['DIRECTIONAL', 'VOLATILITY_STRADDLE'], default: 'DIRECTIONAL' },
+    // Links the two legs of one straddle decision together (both CE and PE AIDecisionLog
+    // entries share the same groupId) — null for ordinary single-leg decisions.
+    strategyGroupId: { type: String, default: null },
     // Only populated by the LLM path (Claude/OpenAI) — the Quant cross-check has no
     // news/track-record input and doesn't produce these.
     justification: { type: String, default: '' },

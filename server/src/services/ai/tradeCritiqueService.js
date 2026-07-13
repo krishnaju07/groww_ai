@@ -82,10 +82,12 @@ export async function critiqueClosedTrade(trade) {
         lessons.push('Manual/other exit at a loss — no rule fired; verify a stop was actually set.');
       }
 
-      // Did the AI enter a condition its own record warns against? (regime this trade opened in)
+      // Did the AI enter a condition its own record warns against? (regime this trade opened
+      // in, scoped to the SAME strategy — a straddle's P&L pattern is nothing like a
+      // directional bet's, so they must never be compared against each other here.)
       const regime = decision?.indicatorsSnapshot?.regime?.regime;
       if (regime) {
-        const edge = await getLearnedEdge(trade.userId, { regime }, { minSample: 5 });
+        const edge = await getLearnedEdge(trade.userId, { regime, strategy: decision?.strategy ?? 'DIRECTIONAL' }, { minSample: 5 });
         if (edge.verdict === 'VETO') {
           verdict = 'MISTAKE';
           lessons.push(`Entered in ${regime}, which the learned-edge gate now flags as a losing regime — future entries here should be vetoed.`);

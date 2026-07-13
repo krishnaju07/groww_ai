@@ -76,6 +76,8 @@ const SettingsPatchSchema = z.object({
       consensusMinAgree: z.coerce.number().int().min(1).optional(),
       learningGateEnabled: z.boolean().optional(),
       learningMinSample: z.coerce.number().int().min(2).optional(),
+      volatilityStraddleEnabled: z.boolean().optional(),
+      autoTradingFocus: z.enum(['EQUITY', 'OPTIONS', 'BOTH']).optional(),
       // Not persisted — only checked when enabling enableLiveAutoTrading, then discarded.
       confirmPhrase: z.string().optional(),
     })

@@ -94,6 +94,10 @@ const UserSettingsSchema = new mongoose.Schema(
       // Learned-edge / expected-value gate (learnedEdgeService.js): veto proven-losing setups.
       learningGateEnabled: { type: Boolean, default: env.LEARNING_GATE_ENABLED },
       learningMinSample: { type: Number, default: env.LEARNING_MIN_SAMPLE },
+      // Volatility-straddle strategy (optionStrategies.js): buy both CE+PE in a HIGH_VOLATILITY regime.
+      volatilityStraddleEnabled: { type: Boolean, default: env.VOLATILITY_STRADDLE_ENABLED },
+      // Which market(s) the 30s auto-trading tick acts on. Defaults to OPTIONS.
+      autoTradingFocus: { type: String, enum: ['EQUITY', 'OPTIONS', 'BOTH'], default: env.AUTO_TRADING_FOCUS },
     },
   },
   { timestamps: true },

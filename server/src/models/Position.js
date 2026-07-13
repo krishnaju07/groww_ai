@@ -30,6 +30,10 @@ const PositionSchema = new mongoose.Schema(
     slMovedToCost: { type: Boolean, default: false },
     partialBooked: { type: Boolean, default: false },
     aiDecisionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AIDecisionLog', default: null },
+    // See AIDecisionLog.strategy/strategyGroupId — carried onto the position so
+    // PositionsTable and the guardian job can identify/group a straddle's two legs.
+    strategy: { type: String, enum: ['DIRECTIONAL', 'VOLATILITY_STRADDLE'], default: 'DIRECTIONAL' },
+    strategyGroupId: { type: String, default: null },
     openedAt: { type: Date, default: Date.now },
   },
   { timestamps: true },

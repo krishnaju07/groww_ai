@@ -18,6 +18,8 @@ import { scoreQuant, scoreQuantOptions } from './aiSignalService.js';
 import { callProvider, callProviderOptions, resolveOptionContract } from './decisionEngine.js';
 import { runConsensus } from './consensusService.js';
 import { getLearnedEdge } from './learnedEdgeService.js';
+import { selectOptionsStrategy, scoreVolatilityStraddle } from './optionStrategies.js';
+import { randomUUID } from 'node:crypto';
 import { AutoTradeActivity } from '../../models/AutoTradeActivity.js';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
@@ -271,6 +273,17 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
     windowStatus.reason = `Regime gate: ${tickRegime.reason}`;
   }
 
+  // Options get their OWN regime handling, separate from equity's blanket sit-out above —
+  // a HIGH_VOLATILITY regime can run the volatility-straddle strategy instead of standing
+  // aside entirely, if enabled (see optionStrategies.js). Cloned from a fresh time-of-day-
+  // only base so options doesn't inherit equity's regime block.
+  const optionsStrategy = selectOptionsStrategy(tickRegime, { volatilityStraddleEnabled: settings.systemConfig?.volatilityStraddleEnabled });
+  const optionsWindowStatus = getAutoTradeWindowStatus(settings.systemConfig);
+  if (settings.systemConfig?.regimeFilterEnabled && optionsStrategy === 'SIT_OUT') {
+    optionsWindowStatus.allowed = false;
+    optionsWindowStatus.reason = `Regime gate: ${tickRegime.reason}`;
+  }
+
   // Learned-edge gate config, resolved once per tick.
   const learningGate = {
     enabled: settings.systemConfig?.learningGateEnabled ?? true,
@@ -278,7 +291,15 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   };
   const tickHour = currentIstHour();
 
-  const equityContexts = await mapWithConcurrency(settings.watchlist.equities, CONTEXT_PREFETCH_CONCURRENCY, async (symbol) => {
+  // Which market(s) this tick actually acts on. Defaults to OPTIONS — this project's
+  // primary focus is Nifty 50 options; the equity watchlist otherwise just feeds AI Top
+  // Picks / the manual Trade page without being auto-traded. An empty array here means
+  // the loop below simply does zero iterations — no separate on/off branching needed.
+  const autoTradingFocus = settings.systemConfig?.autoTradingFocus ?? 'OPTIONS';
+  const activeEquities = autoTradingFocus === 'OPTIONS' ? [] : settings.watchlist.equities;
+  const activeOptionUnderlyings = autoTradingFocus === 'EQUITY' ? [] : settings.watchlist.optionUnderlyings;
+
+  const equityContexts = await mapWithConcurrency(activeEquities, CONTEXT_PREFETCH_CONCURRENCY, async (symbol) => {
     try {
       return await buildContext(symbol, userId);
     } catch (err) {
@@ -286,9 +307,9 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       return null;
     }
   });
-  const equityContextBySymbol = new Map(settings.watchlist.equities.map((s, i) => [s, equityContexts[i]]));
+  const equityContextBySymbol = new Map(activeEquities.map((s, i) => [s, equityContexts[i]]));
 
-  for (const symbol of settings.watchlist.equities) {
+  for (const symbol of activeEquities) {
     try {
       const ctx = equityContextBySymbol.get(symbol);
       if (!ctx) {
@@ -424,14 +445,19 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
   // Since every options decision here is a fresh ENTRY, the time-of-day window gates the
   // whole section up front rather than per-underlying.
   const optionsStartIndex = results.length;
-  if (!windowStatus.allowed) {
-    results.push({ symbol: 'OPTIONS', status: 'SKIPPED_TRADING_WINDOW', reason: windowStatus.reason });
+  const optionUnderlyings = activeOptionUnderlyings;
+  // Options aren't in focus at all (autoTradingFocus === 'EQUITY') — nothing to do, and no
+  // point logging a "trading window" skip for a market this tick isn't even considering.
+  if (!optionUnderlyings.length) {
+    persistTickActivity(userId, results, optionsStartIndex);
+    return { ran: true, results };
+  }
+  if (!optionsWindowStatus.allowed) {
+    results.push({ symbol: 'OPTIONS', status: 'SKIPPED_TRADING_WINDOW', reason: optionsWindowStatus.reason });
     persistTickActivity(userId, results, optionsStartIndex);
     return { ran: true, results };
   }
   const openUnderlyings = new Set(openPositions.filter((p) => p.segment === 'FNO').map((p) => p.underlying));
-
-  const optionUnderlyings = settings.watchlist.optionUnderlyings;
   const optionPrefetch = await mapWithConcurrency(optionUnderlyings, CONTEXT_PREFETCH_CONCURRENCY, async (underlyingSymbol) => {
     try {
       const contract = await resolveOptionContract(underlyingSymbol);
@@ -467,6 +493,134 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         continue;
       }
       const { contract, ctx } = prefetched;
+
+      // Volatility-straddle strategy — HIGH_VOLATILITY regime, direction unclear, buy both
+      // CE and PE (see optionStrategies.js). A completely separate path from the
+      // directional one below: two legs, its own gates, its own learned-edge bucket.
+      if (optionsStrategy === 'VOLATILITY_STRADDLE') {
+        // Needs room for BOTH legs, not just one.
+        if (openPositionCount + 2 > settings.autoInvest.maxOpenPositions) continue;
+
+        const straddle = scoreVolatilityStraddle(ctx, settings.autoInvest.amountPerTrade, riskConfig.maxLossPerTrade);
+        if (straddle.action === 'WAIT') {
+          results.push({ symbol: underlyingSymbol, status: 'SKIPPED_STRADDLE_NO_DATA', reason: straddle.reason });
+          continue;
+        }
+        if (['closing', 'after-square-off'].includes(ctx.sessionPhase)) {
+          results.push({ symbol: underlyingSymbol, action: 'BUY', status: 'SKIPPED_TOO_CLOSE_TO_SQUAREOFF' });
+          continue;
+        }
+        if (straddle.confidence < minConfidence) {
+          results.push({ symbol: underlyingSymbol, action: 'BUY', status: 'SKIPPED_LOW_CONFIDENCE', confidence: straddle.confidence });
+          continue;
+        }
+        if (learningGate.enabled) {
+          const edge = await getLearnedEdge(
+            userId,
+            { regime: tickRegime.regime, hour: tickHour, strategy: 'VOLATILITY_STRADDLE' },
+            { minSample: learningGate.minSample },
+          );
+          if (edge.verdict === 'VETO') {
+            results.push({ symbol: underlyingSymbol, action: 'BUY', status: 'SKIPPED_NEGATIVE_EDGE', reason: edge.reason });
+            continue;
+          }
+        }
+
+        // Straddles are a mechanical, regime-triggered bet (not a directional call), so
+        // there's nothing for an LLM to meaningfully confirm — no LLM/consensus step here,
+        // unlike the directional path below. Same per-underlying cooldown discipline though.
+        const cooldownKey = `STRADDLE:${underlyingSymbol}`;
+        const lastAttempt = lastConfirmAttempt.get(cooldownKey) ?? 0;
+        if (Date.now() - lastAttempt < AI_CONFIRM_COOLDOWN_MS) continue;
+        lastConfirmAttempt.set(cooldownKey, Date.now());
+
+        const strategyGroupId = randomUUID();
+        const legLogFields = {
+          userId,
+          segment: 'FNO',
+          underlying: underlyingSymbol,
+          strike: contract.strike,
+          expiry: contract.expiry,
+          lotSize: contract.lotSize,
+          action: 'BUY',
+          reason: straddle.reason,
+          confidence: straddle.confidence,
+          strategy: 'VOLATILITY_STRADDLE',
+          strategyGroupId,
+          models: [{ name: 'VolatilityStraddle', action: 'BUY', confidence: straddle.confidence }],
+          indicatorsSnapshot: ctx,
+        };
+
+        const ceLog = await AIDecisionLog.create({
+          ...legLogFields,
+          symbol: contract.ce.tradingSymbol,
+          optionType: 'CE',
+          quantity: straddle.ceQuantity,
+          stopLoss: straddle.ceStopLoss,
+          target: straddle.ceTarget,
+        });
+        try {
+          const ceOrder = await placeOrder(userId, {
+            symbol: contract.ce.tradingSymbol,
+            action: 'BUY',
+            quantity: straddle.ceQuantity,
+            stopLoss: straddle.ceStopLoss,
+            target: straddle.ceTarget,
+            source: 'automatic',
+            triggerReason: straddle.reason,
+            aiDecisionId: ceLog._id,
+            segment: 'FNO',
+            strategy: 'VOLATILITY_STRADDLE',
+            strategyGroupId,
+          });
+          ceLog.resultingOrderId = ceOrder.orderId;
+          ceLog.riskResult = { allowed: true, reason: '' };
+          await ceLog.save();
+          openPositionCount += 1;
+          results.push({ symbol: contract.ce.tradingSymbol, action: 'BUY', status: ceOrder.status });
+        } catch (err) {
+          ceLog.riskResult = { allowed: false, reason: err.message };
+          await ceLog.save();
+          results.push({ symbol: contract.ce.tradingSymbol, action: 'BUY', status: 'BLOCKED', reason: err.message });
+        }
+
+        const peLog = await AIDecisionLog.create({
+          ...legLogFields,
+          symbol: contract.pe.tradingSymbol,
+          optionType: 'PE',
+          quantity: straddle.peQuantity,
+          stopLoss: straddle.peStopLoss,
+          target: straddle.peTarget,
+        });
+        try {
+          const peOrder = await placeOrder(userId, {
+            symbol: contract.pe.tradingSymbol,
+            action: 'BUY',
+            quantity: straddle.peQuantity,
+            stopLoss: straddle.peStopLoss,
+            target: straddle.peTarget,
+            source: 'automatic',
+            triggerReason: straddle.reason,
+            aiDecisionId: peLog._id,
+            segment: 'FNO',
+            strategy: 'VOLATILITY_STRADDLE',
+            strategyGroupId,
+          });
+          peLog.resultingOrderId = peOrder.orderId;
+          peLog.riskResult = { allowed: true, reason: '' };
+          await peLog.save();
+          openPositionCount += 1;
+          results.push({ symbol: contract.pe.tradingSymbol, action: 'BUY', status: peOrder.status });
+        } catch (err) {
+          peLog.riskResult = { allowed: false, reason: err.message };
+          await peLog.save();
+          results.push({ symbol: contract.pe.tradingSymbol, action: 'BUY', status: 'BLOCKED', reason: err.message });
+        }
+
+        openUnderlyings.add(underlyingSymbol);
+        continue;
+      }
+
       const quantDecision = scoreQuantOptions(ctx, settings.autoInvest.amountPerTrade, riskConfig.maxLossPerTrade);
 
       if (quantDecision.action === 'WAIT') continue;
