@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '../store/useSettingsStore.js';
+import { usePortfolioStore } from '../store/usePortfolioStore.js';
 import { Card } from '../components/common/Card.jsx';
 import { INRInput } from '../components/common/INRInput.jsx';
-import { BTN_PRIMARY, INPUT } from '../lib/ui.js';
+import { ClearRecordsConfirmModal } from '../components/common/ClearRecordsConfirmModal.jsx';
+import { BTN_PRIMARY, BTN_DANGER, INPUT } from '../lib/ui.js';
 import { toast } from '../store/useToastStore.js';
 import { settingsService } from '../services/settings.service.js';
 
@@ -18,14 +20,23 @@ const TABS = [
   { key: 'ai', label: 'AI & Learning' },
   { key: 'risk', label: 'Risk & Exits' },
   { key: 'data', label: 'Data Sources' },
+  { key: 'danger', label: 'Danger Zone' },
 ];
 
 export function Settings() {
   const settings = useSettingsStore((s) => s.settings);
   const fetch = useSettingsStore((s) => s.fetch);
   const update = useSettingsStore((s) => s.update);
+  const fetchPortfolio = usePortfolioStore((s) => s.fetch);
   const [form, setForm] = useState(null);
   const [modelOptions, setModelOptions] = useState({});
+  const [dzMode, setDzMode] = useState('paper');
+  const [dzSummary, setDzSummary] = useState(null);
+  const [dzShowConfirm, setDzShowConfirm] = useState(false);
+  const [dzClearing, setDzClearing] = useState(false);
+  const [aiSummary, setAiSummary] = useState(null);
+  const [aiShowConfirm, setAiShowConfirm] = useState(false);
+  const [aiClearing, setAiClearing] = useState(false);
   // Tab lives in the URL (?tab=...), not local state — otherwise a page refresh (or a
   // shared/bookmarked link) always lands back on the first tab instead of wherever the
   // user actually was.
@@ -44,7 +55,51 @@ export function Settings() {
     if (settings) setForm(settings);
   }, [settings]);
 
+  useEffect(() => {
+    if (tab !== 'danger') return;
+    setDzSummary(null);
+    settingsService.recordsSummary(dzMode).then(setDzSummary).catch((err) => toast.error(err.message));
+  }, [tab, dzMode]);
+
+  useEffect(() => {
+    if (tab !== 'danger') return;
+    setAiSummary(null);
+    settingsService.aiCallRecordsSummary().then(setAiSummary).catch((err) => toast.error(err.message));
+  }, [tab]);
+
   if (!form) return null;
+
+  async function clearDangerZoneRecords(typedPhrase) {
+    setDzClearing(true);
+    try {
+      const result = await settingsService.clearRecords(dzMode, typedPhrase);
+      toast.success(
+        `Cleared ${result.tradesDeleted} trade(s), ${result.ordersDeleted} order(s)` +
+          (result.capitalReset ? ' — paper capital reset to starting balance' : ''),
+      );
+      setDzShowConfirm(false);
+      settingsService.recordsSummary(dzMode).then(setDzSummary);
+      if (result.capitalReset) fetchPortfolio();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setDzClearing(false);
+    }
+  }
+
+  async function clearAiCallRecordsHandler() {
+    setAiClearing(true);
+    try {
+      const result = await settingsService.clearAiCallRecords();
+      toast.success(`Cleared ${result.decisionsDeleted} AI call record(s)`);
+      setAiShowConfirm(false);
+      settingsService.aiCallRecordsSummary().then(setAiSummary);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAiClearing(false);
+    }
+  }
 
   async function saveAutoInvestSizing() {
     try {
@@ -74,7 +129,7 @@ export function Settings() {
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-5xl space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold">Settings</h1>
         <p className="text-sm text-muted">Auto-trading behavior, AI provider, position management, and data sources.</p>
@@ -95,7 +150,7 @@ export function Settings() {
       </div>
 
       {tab === 'trading' && (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
           <Card>
             <div className="mb-1 font-display font-semibold">Auto-Trading Master Switch</div>
             <p className="mb-3 text-xs text-muted">
@@ -173,7 +228,7 @@ export function Settings() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="lg:col-span-2">
             <div className="mb-4 font-display font-semibold">Auto-Trading Timing</div>
             <p className="mb-3 text-xs text-muted">
               When the unattended auto-trader is allowed to open <span className="font-medium">new</span> positions. These
@@ -258,8 +313,8 @@ export function Settings() {
       )}
 
       {tab === 'ai' && (
-        <div className="space-y-6">
-          <Card>
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+          <Card className="lg:col-span-2">
             <div className="mb-4 font-display font-semibold">AI Provider</div>
             <p className="mb-3 text-xs text-muted">
               Which LLM the AI decision engine calls for BUY/SELL/WAIT calls. Switches immediately, no restart needed. If the
@@ -451,7 +506,7 @@ export function Settings() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="lg:col-span-2">
             <div className="mb-4 font-display font-semibold">Options Strategy</div>
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-bg/30 p-3">
               <div>
@@ -553,7 +608,7 @@ export function Settings() {
       )}
 
       {tab === 'data' && (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
           <Card>
             <div className="mb-4 font-display font-semibold">Market Data &amp; Scanning</div>
             <div className="space-y-4">
@@ -674,6 +729,143 @@ export function Settings() {
               </div>
             </div>
           </Card>
+        </div>
+      )}
+
+      {tab === 'danger' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+          <Card className="border-danger/30">
+            <div className="mb-1 font-display font-semibold text-danger">Clear Trade Records</div>
+            <p className="mb-4 text-xs text-muted">
+              Permanently deletes an account's Trade/Order history — paper and live are always cleared separately, never
+              together, so this can never touch the wrong account's records. Refuses while any position is still open
+              (close it first). Deleted rows cannot be recovered.
+            </p>
+            <div className="mb-4 grid grid-cols-2 gap-2">
+              {[
+                { key: 'paper', label: 'Paper account' },
+                { key: 'live', label: 'Live account' },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setDzMode(key)}
+                  className={`rounded-xl border py-2.5 font-semibold transition-colors ${
+                    dzMode === key ? 'border-accent/50 bg-accent/10 text-accent' : 'border-border/70 text-muted hover:border-border'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {!dzSummary ? (
+              <div className="py-4 text-center text-sm text-muted">Loading…</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-xl border border-border/60 bg-bg/30 p-3">
+                    <div className="font-display text-xl font-bold">{dzSummary.totalTrades}</div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted">Trades</div>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-bg/30 p-3">
+                    <div className="font-display text-xl font-bold">{dzSummary.totalOrders}</div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted">Orders</div>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-bg/30 p-3">
+                    <div className={`font-display text-xl font-bold ${dzSummary.openPositions > 0 ? 'text-danger' : ''}`}>
+                      {dzSummary.openPositions}
+                    </div>
+                    <div className="text-[10px] uppercase tracking-widest text-muted">Open positions</div>
+                  </div>
+                </div>
+                {dzSummary.openPositions > 0 && (
+                  <p className="text-xs text-danger">
+                    Close the {dzSummary.openPositions} open {dzMode} position(s) before clearing — records for a position
+                    still open can't be safely deleted.
+                  </p>
+                )}
+                <button
+                  onClick={() => setDzShowConfirm(true)}
+                  disabled={dzSummary.openPositions > 0 || (dzSummary.totalTrades === 0 && dzSummary.totalOrders === 0)}
+                  className={`w-full ${BTN_DANGER}`}
+                >
+                  Clear {dzMode} records
+                </button>
+              </div>
+            )}
+          </Card>
+
+          <Card className="border-danger/30">
+            <div className="mb-1 font-display font-semibold text-danger">Clear AI Call Records</div>
+            <p className="mb-4 text-xs text-muted">
+              Permanently deletes the AI decision log — every AI call (background scan, "Ask AI", auto-trading),
+              including WAITs, that powers the AI Decisions page and chart decision markers. Not tied to paper/live —
+              the background scan runs regardless of trading mode. Your actual trade P&amp;L history is untouched;
+              only the "why" narrative behind past decisions is erased.
+            </p>
+            {!aiSummary ? (
+              <div className="py-4 text-center text-sm text-muted">Loading…</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-border/60 bg-bg/30 p-3 text-center">
+                  <div className="font-display text-xl font-bold">{aiSummary.totalDecisions}</div>
+                  <div className="text-[10px] uppercase tracking-widest text-muted">AI call records</div>
+                </div>
+                <button
+                  onClick={() => setAiShowConfirm(true)}
+                  disabled={aiSummary.totalDecisions === 0}
+                  className={`w-full ${BTN_DANGER}`}
+                >
+                  Clear AI call records
+                </button>
+              </div>
+            )}
+          </Card>
+          </div>
+
+          {dzShowConfirm && (
+            <ClearRecordsConfirmModal
+              title={dzMode === 'live' ? '⚠ DELETE LIVE TRADE RECORDS' : 'Clear paper trading records'}
+              confirmLabel={dzMode === 'live' ? 'Permanently Delete Live Records' : 'Clear Paper Records'}
+              requirePhrase={dzMode === 'live' ? 'DELETE LIVE RECORDS' : null}
+              description={
+                dzMode === 'live' ? (
+                  <>
+                    This permanently deletes <span className="font-semibold text-text">{dzSummary.totalTrades} real trade(s)</span> and{' '}
+                    {dzSummary.totalOrders} order(s) from your live account's history — actual financial records, not simulated
+                    ones. There is no undo. Real cash isn't affected (that's your broker's, not this app's) — only this
+                    app's copy of the history is erased.
+                  </>
+                ) : (
+                  <>
+                    This deletes <span className="font-semibold text-text">{dzSummary.totalTrades} paper trade(s)</span> and{' '}
+                    {dzSummary.totalOrders} order(s), and resets your paper cash balance back to starting capital — a clean
+                    slate for the paper account. Nothing real-money related is touched.
+                  </>
+                )
+              }
+              onConfirm={clearDangerZoneRecords}
+              onCancel={() => !dzClearing && setDzShowConfirm(false)}
+            />
+          )}
+
+          {aiShowConfirm && (
+            <ClearRecordsConfirmModal
+              title="Clear AI call records"
+              confirmLabel="Clear AI Call Records"
+              requirePhrase={null}
+              description={
+                <>
+                  This permanently deletes <span className="font-semibold text-text">{aiSummary.totalDecisions} AI call record(s)</span> —
+                  the AI Decisions page and chart decision markers will be empty until new calls happen. Trade P&amp;L history
+                  is unaffected.
+                </>
+              }
+              onConfirm={clearAiCallRecordsHandler}
+              onCancel={() => !aiClearing && setAiShowConfirm(false)}
+            />
+          )}
         </div>
       )}
     </div>

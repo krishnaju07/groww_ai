@@ -5,11 +5,13 @@ import { validate } from '../middleware/validate.js';
 import { UserSettings } from '../models/UserSettings.js';
 import { getTradingModeStatus } from '../services/brokers/tradingModeService.js';
 import { invalidateSystemConfigCache } from '../services/config/systemConfig.js';
+import { getRecordsSummary, clearRecords, getAiCallRecordsSummary, clearAiCallRecords } from '../services/recordsService.js';
 import { BROKERS, TRADING_MODES, AI_PROVIDERS, MARKET_DATA_PROVIDERS, AI_MODEL_OPTIONS } from '../config/constants.js';
 
 export const settingsRoutes = Router();
 
 const CONFIRM_LIVE_AUTO_TRADING_PHRASE = 'ENABLE LIVE AUTO TRADING';
+const CONFIRM_CLEAR_LIVE_RECORDS_PHRASE = 'DELETE LIVE RECORDS';
 
 settingsRoutes.get(
   '/',
@@ -170,6 +172,63 @@ settingsRoutes.put(
       new: true,
     });
     const data = await getTradingModeStatus(req.userId, settings);
+    res.json({ success: true, data });
+  }),
+);
+
+/** Danger Zone (Settings) — how many AI call/decision records exist (AIDecisionLog: every decide()/decideOptions() call, including WAIT). Registered before the /records/:mode wildcard below so 'ai-calls' doesn't get swallowed as a `mode` value. */
+settingsRoutes.get(
+  '/records/ai-calls',
+  asyncHandler(async (req, res) => {
+    const data = await getAiCallRecordsSummary(req.userId);
+    res.json({ success: true, data });
+  }),
+);
+
+/** Danger Zone (Settings) — permanently deletes the AI call/decision log. Not financial data, so a click is enough (no typed phrase). */
+settingsRoutes.post(
+  '/records/ai-calls/clear',
+  asyncHandler(async (req, res) => {
+    const data = await clearAiCallRecords(req.userId);
+    res.json({ success: true, data });
+  }),
+);
+
+const RecordsModeParamsSchema = z.object({ mode: z.enum(TRADING_MODES) });
+
+/** Danger Zone (Settings) — how many trade/order/open-position rows exist for a mode, before offering to clear them. */
+settingsRoutes.get(
+  '/records/:mode',
+  validate(RecordsModeParamsSchema, 'params'),
+  asyncHandler(async (req, res) => {
+    const data = await getRecordsSummary(req.userId, req.params.mode);
+    res.json({ success: true, data });
+  }),
+);
+
+const ClearRecordsSchema = z.object({
+  mode: z.enum(TRADING_MODES),
+  confirmPhrase: z.string().optional(),
+});
+
+/**
+ * Danger Zone (Settings) — permanently deletes a mode's Trade/Order/TradeCritique history
+ * (paper mode also resets the paper cash balance). Clearing LIVE records deletes real
+ * financial history, so — same spirit as enabling unattended live auto-trading above — it
+ * requires a typed confirmation phrase, not just a click. Paper is fake money; a click is enough.
+ */
+settingsRoutes.post(
+  '/records/clear',
+  validate(ClearRecordsSchema),
+  asyncHandler(async (req, res) => {
+    const { mode, confirmPhrase } = req.body;
+    if (mode === 'live' && confirmPhrase !== CONFIRM_CLEAR_LIVE_RECORDS_PHRASE) {
+      const e = new Error(`Type "${CONFIRM_CLEAR_LIVE_RECORDS_PHRASE}" exactly to permanently delete live trade records.`);
+      e.code = 'CONFIRMATION_REQUIRED';
+      e.status = 400;
+      throw e;
+    }
+    const data = await clearRecords(req.userId, mode);
     res.json({ success: true, data });
   }),
 );
