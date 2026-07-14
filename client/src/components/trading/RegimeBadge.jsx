@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { aiService } from '../../services/ai.service.js';
 import { usePolling } from '../../hooks/usePolling.js';
+import { Skeleton } from '../common/Skeleton.jsx';
 
 const TONE = {
   STRONG_BULLISH: 'border-accent/50 bg-accent/10 text-accent',
@@ -29,7 +30,7 @@ export function RegimeBadge() {
   const [regime, setRegime] = useState(null);
   usePolling(() => aiService.regime().then(setRegime).catch(() => {}), 30000);
 
-  if (!regime) return null;
+  if (!regime) return <Skeleton className="h-[26px] w-40 rounded-lg" />;
   return (
     <span
       title={regime.reason}

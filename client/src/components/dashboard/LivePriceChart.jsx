@@ -103,7 +103,17 @@ export function LivePriceChart({ symbol, displayLabel, markerFilter }) {
 
   // Fetch candles for this symbol/interval, then poll while the selection is unchanged.
   useEffect(() => {
-    if (!symbol) return undefined;
+    if (!symbol) {
+      // No selection yet (e.g. Options mode before a contract is picked) — clear the chart
+      // rather than leaving the previous symbol's stale candles on screen under a blank header.
+      candleSeriesRef.current?.setData([]);
+      volumeSeriesRef.current?.setData([]);
+      supertrendUpRef.current?.setData([]);
+      supertrendDownRef.current?.setData([]);
+      psarSeriesRef.current?.setData([]);
+      markersRef.current?.setMarkers([]);
+      return undefined;
+    }
     let cancelled = false;
 
     async function load() {

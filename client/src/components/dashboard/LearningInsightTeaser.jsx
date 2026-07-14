@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Brain } from 'lucide-react';
 import { Card } from '../common/Card.jsx';
+import { Skeleton } from '../common/Skeleton.jsx';
 import { reportsService } from '../../services/reports.service.js';
 import { usePolling } from '../../hooks/usePolling.js';
 
@@ -10,7 +11,21 @@ export function LearningInsightTeaser() {
   const [learning, setLearning] = useState(null);
   usePolling(() => reportsService.learning().then(setLearning).catch(() => {}), 30000);
 
-  if (!learning) return null;
+  if (!learning) {
+    return (
+      <Card>
+        <div className="mb-3 flex items-center justify-between">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-3 w-14" />
+        </div>
+        <div className="space-y-2.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-4 w-full" />
+          ))}
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card>

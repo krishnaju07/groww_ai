@@ -29,7 +29,13 @@ export function SignalCard({ symbol, decision, loading, onAskAI }) {
           <div className="flex-1 space-y-2">
             <div className="flex items-center gap-2">
               <Badge tone={TONE[decision.action]}>{decision.action}</Badge>
-              {decision.action !== 'WAIT' && <span className="text-sm text-muted">{decision.quantity} shares</span>}
+              {decision.action !== 'WAIT' && (
+                <span className="text-sm text-muted">
+                  {decision.optionType != null
+                    ? `${decision.quantity} qty${decision.lotSize ? ` (${decision.quantity / decision.lotSize} lot${decision.quantity / decision.lotSize > 1 ? 's' : ''})` : ''}`
+                    : `${decision.quantity} shares`}
+                </span>
+              )}
             </div>
             {decision.action !== 'WAIT' && (
               <div className="flex gap-4 text-sm">

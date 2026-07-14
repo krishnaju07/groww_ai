@@ -26,7 +26,7 @@ export function Dashboard() {
   const fetchDecisions = useAIStore((s) => s.fetchDecisions);
   const signals = useAISignalsStore((s) => s.signals);
   const fetchSignals = useAISignalsStore((s) => s.fetch);
-  const [equityCurve, setEquityCurve] = useState([]);
+  const [equityCurve, setEquityCurve] = useState(null);
   const [trades, setTrades] = useState([]);
 
   usePolling(fetchPortfolio, 5000);
@@ -53,17 +53,15 @@ export function Dashboard() {
 
       <TodayGlanceCard />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <EquityCurve data={equityCurve} />
-      </div>
+      <EquityCurve data={equityCurve} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1 space-y-6">
           <RiskSummaryCard meter={meter} />
           <LearningInsightTeaser />
-          <AITopPicks signals={signals} />
         </div>
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6">
+          <AITopPicks signals={signals} />
           <AIDecisionFeed decisions={decisions} />
         </div>
       </div>

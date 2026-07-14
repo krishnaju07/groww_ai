@@ -46,15 +46,6 @@ export function Settings() {
 
   if (!form) return null;
 
-  async function save() {
-    try {
-      await update({ minInvestment: form.minInvestment, maxInvestment: form.maxInvestment });
-      toast.success('Settings saved');
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }
-
   async function saveAutoInvestSizing() {
     try {
       await update({ autoInvest: { amountPerTrade: form.autoInvest.amountPerTrade, maxOpenPositions: form.autoInvest.maxOpenPositions } });
@@ -86,7 +77,7 @@ export function Settings() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted">AI behavior, investment limits, and operational tuning.</p>
+        <p className="text-sm text-muted">Auto-trading behavior, AI provider, position management, and data sources.</p>
       </div>
 
       <div className="flex gap-1 rounded-xl border border-border/70 bg-surface/50 p-1">
@@ -262,23 +253,6 @@ export function Settings() {
                 </div>
               ))}
             </div>
-          </Card>
-
-          <Card>
-            <div className="mb-4 font-display font-semibold">Investment Limits</div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted">Minimum per trade</label>
-                <INRInput value={form.minInvestment} onChange={(v) => setForm((f) => ({ ...f, minInvestment: v }))} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted">Maximum per trade</label>
-                <INRInput value={form.maxInvestment} onChange={(v) => setForm((f) => ({ ...f, maxInvestment: v }))} />
-              </div>
-            </div>
-            <button onClick={save} className={`${BTN_PRIMARY} mt-4`}>
-              Save Settings
-            </button>
           </Card>
         </div>
       )}

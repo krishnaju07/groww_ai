@@ -1,10 +1,28 @@
 import { ShieldAlert } from 'lucide-react';
 import { Card } from '../common/Card.jsx';
 import { ConfidenceMeter } from '../common/ConfidenceMeter.jsx';
+import { Skeleton } from '../common/Skeleton.jsx';
 import { formatINR } from '../../lib/format.js';
 
 export function RiskSummaryCard({ meter }) {
-  if (!meter) return null;
+  if (!meter) {
+    return (
+      <Card>
+        <div className="mb-4 flex items-center justify-between">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-[72px] w-[72px] rounded-full" />
+          <div className="flex-1 space-y-2.5">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-4 w-full" />
+            ))}
+          </div>
+        </div>
+      </Card>
+    );
+  }
   const { score, cfg, tradesToday, realizedPnlToday } = meter;
   const gaugeColor = score >= 66 ? 'text-danger' : score >= 33 ? 'text-warn' : 'text-accent';
   const gaugeBg = score >= 66 ? 'bg-danger/10' : score >= 33 ? 'bg-warn/10' : 'bg-accent/10';

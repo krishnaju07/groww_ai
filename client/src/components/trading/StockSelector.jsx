@@ -44,8 +44,11 @@ export function StockSelector({ stocks = [], selected, onSelect, onAdd, onRemove
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  function pick(symbol) {
-    onAdd(symbol);
+  async function pick(symbol) {
+    // Awaits the add (which refreshes the watchlist store) before selecting — selecting
+    // first would leave TradePanel briefly without an LTP, since that's sourced from the
+    // watchlist store by symbol match, not fetched independently.
+    await onAdd(symbol);
     onSelect(symbol);
     setQuery('');
     setResults([]);

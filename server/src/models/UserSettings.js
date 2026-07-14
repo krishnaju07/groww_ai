@@ -17,9 +17,6 @@ const UserSettingsSchema = new mongoose.Schema(
     // AI_MODEL_OPTIONS since a provider may add a model before this list is updated.
     aiModel: { type: String, default: '' },
 
-    minInvestment: { type: Number, default: 1000 },
-    maxInvestment: { type: Number, default: 20000 },
-
     // The user's personal FOCUS list — what the AI background scan, auto-trading
     // cron, and default Trade-page selectors actually iterate. Distinct from the full
     // browsable universe (all NSE equities via instrumentService.searchEquities, all

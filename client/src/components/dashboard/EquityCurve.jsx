@@ -1,12 +1,34 @@
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Card } from '../common/Card.jsx';
+import { Skeleton } from '../common/Skeleton.jsx';
 import { formatINRWhole, formatDateTime } from '../../lib/format.js';
 
-export function EquityCurve({ data = [] }) {
+/** @param {{data: object[]|null}} props `null` means "not fetched yet", `[]` means "fetched, nothing to plot". */
+export function EquityCurve({ data }) {
+  if (data == null) {
+    return (
+      <Card>
+        <div className="mb-3 font-display font-semibold">Equity Curve</div>
+        <Skeleton className="h-64 w-full sm:h-72 lg:h-80" />
+      </Card>
+    );
+  }
+
+  if (!data.length) {
+    return (
+      <Card>
+        <div className="mb-3 font-display font-semibold">Equity Curve</div>
+        <div className="flex h-64 items-center justify-center text-sm text-muted sm:h-72 lg:h-80">
+          No closed trades yet — the curve fills in as trades close.
+        </div>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="col-span-full">
+    <Card>
       <div className="mb-3 font-display font-semibold">Equity Curve</div>
-      <div className="h-64 w-full">
+      <div className="h-64 w-full sm:h-72 lg:h-80">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <defs>

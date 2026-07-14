@@ -3,8 +3,11 @@ import { useStocksStore } from '../store/useStocksStore.js';
 import { usePortfolioStore } from '../store/usePortfolioStore.js';
 import { useAIStore } from '../store/useAIStore.js';
 import { useAISignalsStore } from '../store/useAISignalsStore.js';
+import { useSettingsStore } from '../store/useSettingsStore.js';
 import { watchlistService } from '../services/watchlist.service.js';
 import { usePolling } from '../hooks/usePolling.js';
+
+const PROVIDER_LABEL = { openai: 'OpenAI', claude: 'Claude', gemini: 'Gemini', grok: 'Grok', perplexity: 'Perplexity' };
 import { StockSelector } from '../components/trading/StockSelector.jsx';
 import { OptionsSelector } from '../components/trading/OptionsSelector.jsx';
 import { RegimeBadge } from '../components/trading/RegimeBadge.jsx';
@@ -25,6 +28,9 @@ export function Trade() {
   const deciding = useAIStore((s) => s.deciding);
   const signals = useAISignalsStore((s) => s.signals);
   const fetchSignals = useAISignalsStore((s) => s.fetch);
+  const settings = useSettingsStore((s) => s.settings);
+  const tradingMode = useSettingsStore((s) => s.tradingMode);
+  const fetchSettings = useSettingsStore((s) => s.fetch);
 
   const [mode, setMode] = useState('EQUITY');
   const [symbol, setSymbol] = useState('RELIANCE');
@@ -36,6 +42,11 @@ export function Trade() {
   usePolling(fetchPortfolio, 5000);
   usePolling(fetchSignals, 30000);
 
+  useEffect(() => {
+    if (!settings) fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function refreshOptionFocus() {
     watchlistService.get().then((data) => setFocusOptionUnderlyings(data.optionUnderlyings.map((u) => u.symbol)));
   }
@@ -45,7 +56,10 @@ export function Trade() {
 
   async function handleAddEquity(sym) {
     await watchlistService.addEquity(sym);
-    fetchWatchlist();
+    // Awaited (not fire-and-forget) — StockSelector selects the newly-added symbol right
+    // after this resolves, and the watchlist store is where TradePanel's LTP comes from;
+    // without this the panel briefly shows no LTP for a just-added, just-selected symbol.
+    await fetchWatchlist();
   }
   async function handleRemoveEquity(sym) {
     await watchlistService.removeEquity(sym);
@@ -105,7 +119,9 @@ export function Trade() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold">Trade</h1>
-          <p className="text-sm text-muted">Analyze, ask Claude for a read, and place a paper order.</p>
+          <p className="text-sm text-muted">
+            Analyze, ask {PROVIDER_LABEL[settings?.aiProvider] ?? 'the AI'} for a read, and place a {tradingMode?.mode === 'live' ? 'real-money' : 'paper'} order.
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <RegimeBadge />

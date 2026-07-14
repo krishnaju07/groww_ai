@@ -24,8 +24,6 @@ settingsRoutes.get(
 );
 
 const SettingsPatchSchema = z.object({
-  minInvestment: z.coerce.number().positive().optional(),
-  maxInvestment: z.coerce.number().positive().optional(),
   aiProvider: z.enum(AI_PROVIDERS).optional(),
   // Not restricted to AI_MODEL_OPTIONS's curated list — a user may want to type a
   // model id a provider shipped after that list was last updated. Empty string means
