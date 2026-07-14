@@ -17,12 +17,18 @@ function startOfTodayIst() {
   return new Date(start.getTime() - (5 * 60 + 30) * 60 * 1000);
 }
 
-/** @param {string} userId @returns {Promise<{trades:number, realizedPnl:number, totalCapital:number, consecutiveLosses:number}>} */
-async function computeTodayStats(userId) {
+/**
+ * Scoped to `mode` (paper vs live) — a heavy paper-trading session must never trip the
+ * daily loss cap / max-trades / consecutive-losses gates on real orders, and vice versa.
+ * Each mode tracks its own limits against the same configured thresholds.
+ * @param {string} userId @param {'paper'|'live'} mode
+ * @returns {Promise<{trades:number, realizedPnl:number, totalCapital:number, consecutiveLosses:number}>}
+ */
+async function computeTodayStats(userId, mode) {
   const since = startOfTodayIst();
   const [tradeCount, closedToday, user] = await Promise.all([
-    Trade.countDocuments({ userId, createdAt: { $gte: since } }),
-    Trade.find({ userId, status: 'CLOSED', closedAt: { $gte: since } }).sort({ closedAt: 1 }).lean(),
+    Trade.countDocuments({ userId, mode, createdAt: { $gte: since } }),
+    Trade.find({ userId, mode, status: 'CLOSED', closedAt: { $gte: since } }).sort({ closedAt: 1 }).lean(),
     User.findById(userId).lean(),
   ]);
   const realizedPnl = round2(closedToday.reduce((sum, t) => sum + (t.pnl || 0), 0));
@@ -41,10 +47,12 @@ async function computeTodayStats(userId) {
 
 /**
  * @param {string} userId
+ * @param {'paper'|'live'} mode which account's today-stats gate this order — a paper
+ *   session's trade count/losses must never block (or accidentally permit) a live order
  * @param {{symbol:string, action:'BUY'|'SELL', quantity:number, estimatedPrice:number, stopLoss?:number}} proposedOrder
  * @returns {Promise<import('../../types.js').CanTradeResult>}
  */
-export async function canTrade(userId, proposedOrder) {
+export async function canTrade(userId, mode, proposedOrder) {
   const log = async (type, reason, context) => {
     await RiskEvent.create({ userId, type, reason, context });
   };
@@ -56,24 +64,27 @@ export async function canTrade(userId, proposedOrder) {
   }
 
   const cfg = await getRiskConfig(userId);
-  const today = await computeTodayStats(userId);
+  const today = await computeTodayStats(userId, mode);
 
-  if (today.trades >= cfg.maxTradesPerDay) {
-    const result = { allowed: false, reason: `Max trades/day (${cfg.maxTradesPerDay}) reached.` };
-    await log('BLOCK', result.reason, { proposedOrder, today });
-    return result;
-  }
-
-  if (today.realizedPnl <= -Math.abs(cfg.maxLossPerDay)) {
-    const result = { allowed: false, reason: `Daily loss limit ₹${cfg.maxLossPerDay} hit (realized ₹${today.realizedPnl}).` };
-    await log('BLOCK', result.reason, { proposedOrder, today });
-    return result;
-  }
-
-  // Capital%, profit-target, consecutive-loss, and per-trade-loss checks only meaningfully
-  // apply to entries (BUY); a SELL just closes existing exposure and must never be blocked
-  // by these (that would trap the platform in a position it's trying to exit).
+  // Every check below only meaningfully applies to entries (BUY); a SELL just closes
+  // existing exposure and must never be blocked by these — a max-trades/max-loss cap hit
+  // must never trap the platform (or the user, clicking "Exit" on a position) in exposure
+  // it's trying to close. Stop-loss/target auto-exits (positionGuardianJob) route through
+  // this same canTrade() via orderService, so this exemption is also what keeps a stop-loss
+  // actually firing once the daily loss cap it's partly responsible for has been hit.
   if (proposedOrder.action === 'BUY') {
+    if (today.trades >= cfg.maxTradesPerDay) {
+      const result = { allowed: false, reason: `Max trades/day (${cfg.maxTradesPerDay}) reached.` };
+      await log('BLOCK', result.reason, { proposedOrder, today });
+      return result;
+    }
+
+    if (today.realizedPnl <= -Math.abs(cfg.maxLossPerDay)) {
+      const result = { allowed: false, reason: `Daily loss limit ₹${cfg.maxLossPerDay} hit (realized ₹${today.realizedPnl}).` };
+      await log('BLOCK', result.reason, { proposedOrder, today });
+      return result;
+    }
+
     // Golden Rule — the ₹ daily profit target is the primary "stop when you've won"
     // gate; it takes precedence over the older percent-based lock. Once hit, new entries
     // stop for the day but existing positions keep being managed to close.

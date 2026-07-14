@@ -9,6 +9,8 @@
  */
 import { Trade } from '../models/Trade.js';
 import { AIDecisionLog } from '../models/AIDecisionLog.js';
+import { UserSettings } from '../models/UserSettings.js';
+import { effectiveMode } from './brokers/tradingModeService.js';
 import { round2 } from '../utils/format.js';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
@@ -58,14 +60,18 @@ function istHour(d) {
 }
 
 /**
- * Daily / weekly / monthly report.
+ * Daily / weekly / monthly report. Scoped to whichever mode (paper/live) is currently
+ * active — blending a paper account's simulated results into a live P&L report (or the
+ * reverse) would misrepresent real trading performance.
  * @param {string} userId @param {'daily'|'weekly'|'monthly'} period
  * @returns {Promise<object>}
  */
 export async function getPeriodReport(userId, period = 'daily') {
   const days = PERIOD_DAYS[period] ?? 1;
   const since = windowStart(days);
-  const trades = await Trade.find({ userId, status: 'CLOSED', closedAt: { $gte: since } }).lean();
+  const settings = await UserSettings.findOne({ userId }).lean();
+  const mode = await effectiveMode(userId, settings);
+  const trades = await Trade.find({ userId, mode, status: 'CLOSED', closedAt: { $gte: since } }).lean();
 
   const overall = summarize(trades);
   const aiTrades = trades.filter((t) => t.aiDecisionId);
@@ -128,13 +134,16 @@ function bucketStats(rows) {
 
 /**
  * Learning insights — which conditions the AI's closed trades actually made money under.
+ * Scoped to the currently active mode (paper/live), same reasoning as getPeriodReport().
  * @param {string} userId
  * @returns {Promise<object>}
  */
 export async function getLearningInsights(userId) {
+  const settings = await UserSettings.findOne({ userId }).lean();
+  const mode = await effectiveMode(userId, settings);
   // Every closed AI-triggered trade, joined to the decision that opened it (for the
   // conditions in effect at entry).
-  const aiTrades = await Trade.find({ userId, status: 'CLOSED', aiDecisionId: { $ne: null } }).lean();
+  const aiTrades = await Trade.find({ userId, mode, status: 'CLOSED', aiDecisionId: { $ne: null } }).lean();
   if (!aiTrades.length) {
     return { sampleSize: 0, overall: summarize([]), byRegime: [], byOptionType: [], byConfidence: [], byOpportunity: [], byHour: [], note: 'No closed AI trades yet — insights appear once the AI has a track record.' };
   }

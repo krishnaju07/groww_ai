@@ -139,9 +139,18 @@ async function getPaperPortfolio(userId) {
   };
 }
 
-/** @param {string} userId @param {number} [limit] @returns {Promise<object[]>} */
+/**
+ * Scoped to whichever broker/mode is currently active, same as getPortfolio()/
+ * getEquityCurve() above — a paper trade must never show up next to a real fill (or the
+ * reverse) in a "recent trades" list with no visual distinction between the two.
+ * @param {string} userId @param {number} [limit] @returns {Promise<object[]>}
+ */
 export async function getRecentTrades(userId, limit = 50) {
-  const trades = await Trade.find({ userId }).sort({ createdAt: -1 }).limit(limit).lean();
+  const settings = await UserSettings.findOne({ userId }).lean();
+  const activeBroker = settings?.activeBroker ?? 'paper';
+  const mode = await effectiveMode(userId, settings);
+  const brokerName = mode === 'live' ? activeBroker : 'paper';
+  const trades = await Trade.find({ userId, broker: brokerName, mode }).sort({ createdAt: -1 }).limit(limit).lean();
   return trades.map((t) => ({
     id: String(t._id),
     broker: t.broker,

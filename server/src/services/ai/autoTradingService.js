@@ -352,7 +352,7 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       // Learned-edge gate — don't re-take a fresh entry the AI's own history proves it
       // loses on (this regime / this hour). BUY-only; an exit is never blocked.
       if (quantDecision.action === 'BUY' && learningGate.enabled) {
-        const edge = await getLearnedEdge(userId, { regime: tickRegime.regime, hour: tickHour }, { minSample: learningGate.minSample });
+        const edge = await getLearnedEdge(userId, mode, { regime: tickRegime.regime, hour: tickHour }, { minSample: learningGate.minSample });
         if (edge.verdict === 'VETO') {
           results.push({ symbol, action: 'BUY', status: 'SKIPPED_NEGATIVE_EDGE', reason: edge.reason });
           continue;
@@ -517,6 +517,7 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
         if (learningGate.enabled) {
           const edge = await getLearnedEdge(
             userId,
+            mode,
             { regime: tickRegime.regime, hour: tickHour, strategy: 'VOLATILITY_STRADDLE' },
             { minSample: learningGate.minSample },
           );
@@ -644,7 +645,7 @@ export async function runAutoTradingTick(userId = DEFAULT_USER_ID) {
       // Learned-edge gate — options entries are always fresh; veto proven-losing conditions
       // (this regime / this side / this hour) before spending an LLM call on them.
       if (learningGate.enabled) {
-        const edge = await getLearnedEdge(userId, { regime: tickRegime.regime, optionType: quantDecision.optionType, hour: tickHour }, { minSample: learningGate.minSample });
+        const edge = await getLearnedEdge(userId, mode, { regime: tickRegime.regime, optionType: quantDecision.optionType, hour: tickHour }, { minSample: learningGate.minSample });
         if (edge.verdict === 'VETO') {
           results.push({ symbol: underlyingSymbol, action: quantDecision.action, status: 'SKIPPED_NEGATIVE_EDGE', reason: edge.reason });
           continue;

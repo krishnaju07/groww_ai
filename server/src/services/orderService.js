@@ -305,7 +305,7 @@ export async function placeOrder(userId, input) {
     }
   }
 
-  const riskResult = await canTrade(userId, {
+  const riskResult = await canTrade(userId, mode, {
     symbol: input.symbol,
     action: input.action,
     quantity: input.quantity,

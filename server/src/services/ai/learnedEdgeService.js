@@ -15,7 +15,7 @@ import { round2 } from '../../utils/format.js';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
 const CACHE_TTL_MS = 3 * 60 * 1000;
-const cache = new Map(); // userId -> {rows, fetchedAt}
+const cache = new Map(); // `${userId}:${mode}` -> {rows, fetchedAt}
 
 /** @param {string|Date} d @returns {number} IST hour-of-day (0-23) */
 function istHour(d) {
@@ -24,15 +24,18 @@ function istHour(d) {
 
 /**
  * Every closed AI trade joined to the regime/hour that was in effect at entry. Cached
- * briefly per user so a scan tick doesn't re-query for each symbol.
- * @param {string} userId
+ * briefly per user+mode so a scan tick doesn't re-query for each symbol. Scoped to `mode`
+ * so a paper trade's fake-money history can never veto a live entry (or the reverse) —
+ * each account learns only from its own outcomes.
+ * @param {string} userId @param {'paper'|'live'} mode
  * @returns {Promise<Array<{pnl:number, regime:string|null, optionType:string|null, hour:number}>>}
  */
-async function loadHistory(userId) {
-  const cached = cache.get(userId);
+async function loadHistory(userId, mode) {
+  const cacheKey = `${userId}:${mode}`;
+  const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.rows;
 
-  const trades = await Trade.find({ userId, status: 'CLOSED', aiDecisionId: { $ne: null } })
+  const trades = await Trade.find({ userId, mode, status: 'CLOSED', aiDecisionId: { $ne: null } })
     .select('pnl optionType openedAt aiDecisionId')
     .lean();
   const decIds = trades.map((t) => t.aiDecisionId).filter(Boolean);
@@ -51,14 +54,25 @@ async function loadHistory(userId) {
       hour: istHour(t.openedAt),
     };
   });
-  cache.set(userId, { rows, fetchedAt: Date.now() });
+  cache.set(cacheKey, { rows, fetchedAt: Date.now() });
   return rows;
 }
 
-/** Invalidate a user's cached history (call after a trade closes so the next gate sees it). */
-export function invalidateEdgeCache(userId) {
-  if (userId) cache.delete(userId);
-  else cache.clear();
+/**
+ * Invalidate a user+mode's cached history (call after a trade closes so the next gate
+ * sees it). `mode` omitted clears both paper and live entries for the user.
+ * @param {string} userId @param {'paper'|'live'} [mode]
+ */
+export function invalidateEdgeCache(userId, mode) {
+  if (!userId) {
+    cache.clear();
+    return;
+  }
+  if (mode) cache.delete(`${userId}:${mode}`);
+  else {
+    cache.delete(`${userId}:paper`);
+    cache.delete(`${userId}:live`);
+  }
 }
 
 /**
@@ -80,14 +94,14 @@ function stats(pnls) {
  * Verdict on whether the AI should take a setup, based on its own track record under the
  * same conditions.
  *
- * @param {string} userId
+ * @param {string} userId @param {'paper'|'live'} mode
  * @param {{regime?:string|null, optionType?:string|null, hour?:number|null, strategy?:string|null}} setup
  * @param {{minSample?:number}} [opts] minSample = trades a bucket needs before it may VETO
  * @returns {Promise<{verdict:'PROCEED'|'CAUTION'|'VETO', reason:string, worst:object|null, buckets:object[]}>}
  */
-export async function getLearnedEdge(userId, setup, opts = {}) {
+export async function getLearnedEdge(userId, mode, setup, opts = {}) {
   const minSample = opts.minSample ?? 5;
-  let rows = await loadHistory(userId);
+  let rows = await loadHistory(userId, mode);
 
   // A straddle's P&L pattern (one leg wins big, the other decays to near-zero) is
   // fundamentally different from a directional CE/PE bet's — averaging them into the same

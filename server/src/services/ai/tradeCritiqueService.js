@@ -37,7 +37,7 @@ function classifyExit(reason = '') {
 export async function critiqueClosedTrade(trade) {
   try {
     // Every close means the edge history changed — refresh it regardless of critique.
-    invalidateEdgeCache(trade.userId);
+    invalidateEdgeCache(trade.userId, trade.mode);
     if (!trade.aiDecisionId) return null;
 
     const decision = await AIDecisionLog.findById(trade.aiDecisionId).lean();
@@ -87,7 +87,7 @@ export async function critiqueClosedTrade(trade) {
       // directional bet's, so they must never be compared against each other here.)
       const regime = decision?.indicatorsSnapshot?.regime?.regime;
       if (regime) {
-        const edge = await getLearnedEdge(trade.userId, { regime, strategy: decision?.strategy ?? 'DIRECTIONAL' }, { minSample: 5 });
+        const edge = await getLearnedEdge(trade.userId, trade.mode, { regime, strategy: decision?.strategy ?? 'DIRECTIONAL' }, { minSample: 5 });
         if (edge.verdict === 'VETO') {
           verdict = 'MISTAKE';
           lessons.push(`Entered in ${regime}, which the learned-edge gate now flags as a losing regime — future entries here should be vetoed.`);

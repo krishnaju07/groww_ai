@@ -1,4 +1,6 @@
 import { Trade } from '../../models/Trade.js';
+import { UserSettings } from '../../models/UserSettings.js';
+import { effectiveMode } from '../brokers/tradingModeService.js';
 import { getRiskConfig } from './riskConfig.js';
 import { round2 } from '../../utils/format.js';
 
@@ -15,10 +17,15 @@ function startOfTodayIst() {
  */
 export async function getRiskMeter(userId) {
   const cfg = await getRiskConfig(userId);
+  const settings = await UserSettings.findOne({ userId }).lean();
+  // Scoped to whichever account (paper/live) is effectively active — a paper-trading
+  // session's trade count/P&L must never show up as "today's" risk usage against real
+  // money, and vice versa.
+  const mode = await effectiveMode(userId, settings);
   const since = startOfTodayIst();
   const [tradesToday, closedToday] = await Promise.all([
-    Trade.countDocuments({ userId, createdAt: { $gte: since } }),
-    Trade.find({ userId, status: 'CLOSED', closedAt: { $gte: since } }).lean(),
+    Trade.countDocuments({ userId, mode, createdAt: { $gte: since } }),
+    Trade.find({ userId, mode, status: 'CLOSED', closedAt: { $gte: since } }).lean(),
   ]);
   const realizedPnlToday = round2(closedToday.reduce((sum, t) => sum + (t.pnl || 0), 0));
 
