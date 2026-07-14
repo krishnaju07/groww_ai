@@ -69,7 +69,10 @@ export function LivePriceChart({ symbol, displayLabel, markerFilter }) {
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     });
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    // visible:false — otherwise this scale draws its own right-axis tick labels (0, etc.)
+    // in the same corner as the main price scale's, overlapping/cutting each other off.
+    // The volume bars themselves still render via scaleMargins; only its own axis is hidden.
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
 
     const supertrendUp = chart.addSeries(LineSeries, { color: ACCENT, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
     const supertrendDown = chart.addSeries(LineSeries, { color: DANGER, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });

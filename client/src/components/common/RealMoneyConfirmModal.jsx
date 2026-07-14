@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ModalOverlay } from './ModalOverlay.jsx';
 import { BTN_DANGER, BTN_SECONDARY, INPUT } from '../../lib/ui.js';
 
 /**
@@ -9,7 +10,7 @@ export function RealMoneyConfirmModal({ action, symbol, quantity, estimatedValue
   const canConfirm = typed.trim().toUpperCase() === 'CONFIRM';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onCancel}>
+    <ModalOverlay onDismiss={onCancel}>
       <div
         className="glass-card w-full max-w-md border-danger/40 p-6 shadow-[0_0_44px_rgba(255,82,82,0.25)]"
         onClick={(e) => e.stopPropagation()}
@@ -39,6 +40,6 @@ export function RealMoneyConfirmModal({ action, symbol, quantity, estimatedValue
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

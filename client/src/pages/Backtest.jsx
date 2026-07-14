@@ -203,6 +203,7 @@ export function Backtest() {
                 type="checkbox"
                 checked={form.trailingEnabled}
                 onChange={(e) => setForm((f) => ({ ...f, trailingEnabled: e.target.checked }))}
+                className="h-4 w-4 rounded accent-accent"
               />
               Trailing stop
             </label>

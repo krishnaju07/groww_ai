@@ -21,6 +21,13 @@ body,
   height: 100%;
 }
 
+/* The app is dark-only — without this, native controls (date picker icon, checkboxes,
+   scrollbars) default to a light color-scheme and render as barely-visible black-on-dark
+   or jarring light-mode widgets against the rest of the UI. */
+:root {
+  color-scheme: dark;
+}
+
 body {
   @apply bg-bg text-text font-sans antialiased;
   background-image:

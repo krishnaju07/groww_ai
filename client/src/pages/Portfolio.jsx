@@ -25,7 +25,14 @@ export function Portfolio() {
         <p className="text-sm text-muted">Your paper-trading positions and trade history.</p>
       </div>
       <PortfolioSummaryBar portfolio={portfolio} />
-      <PositionsTable positions={portfolio?.positions} signals={signals} />
+      <PositionsTable
+        positions={portfolio?.positions}
+        signals={signals}
+        onExited={() => {
+          fetchPortfolio();
+          fetchTrades();
+        }}
+      />
       <RecentTradesTable trades={trades} />
     </div>
   );

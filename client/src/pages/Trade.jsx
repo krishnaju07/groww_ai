@@ -180,7 +180,7 @@ export function Trade() {
         </div>
       </div>
 
-      <PositionsTable positions={portfolio?.positions} signals={signals} />
+      <PositionsTable positions={portfolio?.positions} signals={signals} onExited={fetchPortfolio} />
     </div>
   );
 }

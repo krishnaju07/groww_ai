@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ModalOverlay } from './ModalOverlay.jsx';
 import { BTN_DANGER, BTN_SECONDARY, INPUT } from '../../lib/ui.js';
 
 const PHRASE = 'ENABLE LIVE AUTO TRADING';
@@ -11,7 +12,7 @@ export function LiveAutoTradingConfirmModal({ onConfirm, onCancel }) {
   const canConfirm = typed.trim() === PHRASE;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onCancel}>
+    <ModalOverlay onDismiss={onCancel}>
       <div
         className="glass-card w-full max-w-md border-danger/40 p-6 shadow-[0_0_44px_rgba(255,82,82,0.25)]"
         onClick={(e) => e.stopPropagation()}
@@ -42,6 +43,6 @@ export function LiveAutoTradingConfirmModal({ onConfirm, onCancel }) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
